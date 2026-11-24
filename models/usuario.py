@@ -90,13 +90,28 @@ class Usuario(ABC):
     @abstractmethod
     def pode_acessar(self, modulo: str) -> bool:
         """
-        Método polimórfico obrigatório. Cada especialização define suas permissões.
+        Método polimórfico obrigatório. Cada especialização define suas permissões de abas/módulos.
         """
         pass
 
     @abstractmethod
     def obter_permissoes(self) -> list:
         """Retorna a lista de módulos aos quais este perfil tem acesso."""
+        pass
+
+    @abstractmethod
+    def pode_executar(self, acao: str) -> bool:
+        """
+        Método polimórfico para controle de acesso granular por operação.
+        Ações conhecidas:
+        - 'criar_pedido', 'gerenciar_pedido', 'cancelar_pedido', 'solicitar_devolucao'
+        - 'conferir_devolucao', 'separar_expedir_pedido'
+        - 'confirmar_pagamento', 'registrar_reembolso', 'pagar_despesa', 'cadastrar_despesa', 'cadastrar_fornecedor'
+        - 'cadastrar_cliente', 'editar_cliente', 'excluir_cliente'
+        - 'cadastrar_produto', 'editar_produto', 'excluir_produto', 'alterar_preco_produto'
+        - 'movimentar_estoque', 'ajustar_estoque'
+        - 'gerenciar_usuarios'
+        """
         pass
 
     def to_dict(self):
@@ -116,7 +131,7 @@ class Usuario(ABC):
 class Administrador(Usuario):
     """
     Especialização Administrador: Acesso completo ao sistema e à gestão de usuários.
-    Demonstra POLIMORFISMO implementando 'pode_acessar' e 'obter_permissoes'.
+    Demonstra POLIMORFISMO implementando 'pode_acessar', 'obter_permissoes' e 'pode_executar'.
     """
     PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'usuarios', 'financeiro'}
 
@@ -129,13 +144,23 @@ class Administrador(Usuario):
     def obter_permissoes(self) -> list:
         return list(self.PERMISSOES)
 
+    def pode_executar(self, acao: str) -> bool:
+        # Administrador possui acesso e execução irrestritos a todas as operações
+        return True
+
 
 class Estoquista(Usuario):
     """
     Especialização Estoque: Acesso ao Dashboard e Estoque/Produtos.
-    Demonstra POLIMORFISMO com regras restritas de acesso.
+    Operações permitidas: entradas, saídas, ajustes, conferência de devoluções e separação/expedição.
+    Operações proibidas: alterar preços, cadastrar/editar pedidos, gerenciar clientes, usuários ou financeiro.
+    Demonstra POLIMORFISMO.
     """
     PERMISSOES = {'dashboard', 'produtos', 'estoque'}
+    ACOES_PERMITIDAS = {
+        'cadastrar_produto', 'editar_produto', 'movimentar_estoque', 'ajustar_estoque',
+        'conferir_devolucao', 'separar_expedir_pedido'
+    }
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 2):
         super().__init__(nome, email, perfil_id, "Estoque", senha_hash, ativo, criado_em, id)
@@ -146,13 +171,23 @@ class Estoquista(Usuario):
     def obter_permissoes(self) -> list:
         return list(self.PERMISSOES)
 
+    def pode_executar(self, acao: str) -> bool:
+        return acao in self.ACOES_PERMITIDAS
+
 
 class Vendedor(Usuario):
     """
-    Especialização Vendas: Acesso ao Dashboard, Estoque/Produtos, Pedidos e Clientes.
+    Especialização Vendas: Acesso ao Dashboard, Estoque (apenas consulta), Pedidos e Clientes.
+    Operações permitidas: cadastrar e gerenciar clientes, criar e gerenciar pedidos, solicitar cancelamento e devolução.
+    Operações proibidas: movimentação manual ou ajuste de estoque, alteração de produtos/preços,
+    confirmação manual de pagamentos, financeiro ou usuários.
     Demonstra POLIMORFISMO.
     """
     PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes'}
+    ACOES_PERMITIDAS = {
+        'cadastrar_cliente', 'editar_cliente', 'criar_pedido', 'gerenciar_pedido',
+        'cancelar_pedido', 'solicitar_devolucao'
+    }
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 3):
         super().__init__(nome, email, perfil_id, "Vendas", senha_hash, ativo, criado_em, id)
@@ -163,14 +198,24 @@ class Vendedor(Usuario):
     def obter_permissoes(self) -> list:
         return list(self.PERMISSOES)
 
+    def pode_executar(self, acao: str) -> bool:
+        return acao in self.ACOES_PERMITIDAS
+
 
 class Gerente(Usuario):
     """
-    Especialização Gerência: Acesso a todos os módulos operacionais (Dashboard, Estoque/Produtos, Pedidos, Clientes, Financeiro),
-    supervisão de fluxo e aprovação de cancelamentos/devoluções, sem permissão para administrar usuários.
+    Especialização Gerência: Supervisão e consulta geral dos módulos permitidos.
+    Acesso a Dashboard, Estoque (consulta), Pedidos, Clientes (consulta) e Financeiro (consulta).
+    Operações permitidas: supervisão, alteração de status operacional de pedidos, conferência/aprovação de devoluções.
+    Operações proibidas: confirmação manual de pagamentos (restrita ao Financeiro/Admin), alteração de preços,
+    cadastro de despesas/pagamentos de caixa, e administração de usuários.
     Demonstra POLIMORFISMO.
     """
     PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'financeiro'}
+    ACOES_PERMITIDAS = {
+        'gerenciar_pedido', 'cancelar_pedido', 'solicitar_devolucao', 'conferir_devolucao',
+        'separar_expedir_pedido'
+    }
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 4):
         super().__init__(nome, email, perfil_id, "Gerência", senha_hash, ativo, criado_em, id)
@@ -181,14 +226,24 @@ class Gerente(Usuario):
     def obter_permissoes(self) -> list:
         return list(self.PERMISSOES)
 
+    def pode_executar(self, acao: str) -> bool:
+        return acao in self.ACOES_PERMITIDAS
+
 
 class Financeiro(Usuario):
     """
-    Especialização Financeiro: Acesso ao Dashboard, confirmação de pagamentos,
-    contas a pagar, contas a receber, fluxo de caixa e relatórios financeiros.
+    Especialização Financeiro: Acesso ao Dashboard, Pedidos (apenas consulta) e Financeiro.
+    Operações permitidas: consultar pedidos, confirmar pagamentos, registrar estornos/reembolsos,
+    cadastrar fornecedores, cadastrar contas a pagar, quitar contas (saída de caixa) e conciliações.
+    Operações proibidas: criação ou alteração operacional de pedidos (itens, frete, status operacional),
+    movimentações de estoque, alteração de clientes ou usuários.
     Demonstra POLIMORFISMO.
     """
     PERMISSOES = {'dashboard', 'pedidos', 'financeiro'}
+    ACOES_PERMITIDAS = {
+        'confirmar_pagamento', 'registrar_reembolso', 'pagar_despesa',
+        'cadastrar_despesa', 'cadastrar_fornecedor'
+    }
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 5):
         super().__init__(nome, email, perfil_id, "Financeiro", senha_hash, ativo, criado_em, id)
@@ -198,6 +253,9 @@ class Financeiro(Usuario):
 
     def obter_permissoes(self) -> list:
         return list(self.PERMISSOES)
+
+    def pode_executar(self, acao: str) -> bool:
+        return acao in self.ACOES_PERMITIDAS
 
 
 class UsuarioFactory:

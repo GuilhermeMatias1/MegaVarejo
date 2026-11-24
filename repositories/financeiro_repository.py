@@ -1,7 +1,8 @@
 import datetime
 from repositories.base_repository import BaseRepository
 from database.connection import DatabaseConnection
-from models.financeiro import Fornecedor, ContaPagar, TransacaoCaixa, ResumoFinanceiro
+from models.financeiro import Fornecedor, ContaPagar, ContaReceber, TransacaoCaixa, ResumoFinanceiro
+from models.pedido import formatar_data_br
 
 class FinanceiroRepository(BaseRepository):
     """
@@ -230,28 +231,115 @@ class FinanceiroRepository(BaseRepository):
             if should_close: local_conn.close()
 
     # ==========================================
-    # 3. CONTAS A RECEBER (PEDIDOS PENDENTES E PARCIAIS)
+    # 3. CONTAS A RECEBER (PEDIDOS E CLIENTES)
     # ==========================================
+    def criar_conta_receber(self, conta: ContaReceber, conn=None) -> int:
+        local_conn = conn or self._get_connection()
+        should_close = conn is None and self._connection is None
+        try:
+            with local_conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO contas_receber 
+                    (pedido_id, cliente_id, valor_original, valor_recebido, data_vencimento, status, forma_pagamento, observacoes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        valor_original = VALUES(valor_original),
+                        data_vencimento = VALUES(data_vencimento),
+                        forma_pagamento = VALUES(forma_pagamento),
+                        cliente_id = VALUES(cliente_id)
+                    """,
+                    (conta.pedido_id, conta.cliente_id, conta.valor_original, conta.valor_recebido,
+                     conta.data_vencimento, conta._status, conta._forma_pagamento, conta._observacoes)
+                )
+                novo_id = cursor.lastrowid
+                if conn is None:
+                    local_conn.commit()
+                return novo_id
+        finally:
+            if should_close: local_conn.close()
+
+    def buscar_conta_receber_por_pedido(self, pedido_id: int, conn=None, for_update: bool = False) -> ContaReceber:
+        local_conn = conn or self._get_connection()
+        should_close = conn is None and self._connection is None
+        try:
+            with local_conn.cursor() as cursor:
+                sql = """
+                    SELECT cr.*, p.numero_pedido, c.nome AS cliente_nome, c.cpf AS cliente_cpf
+                    FROM contas_receber cr
+                    JOIN pedidos p ON p.id = cr.pedido_id
+                    LEFT JOIN clientes c ON c.id = cr.cliente_id
+                    WHERE cr.pedido_id = %s
+                """
+                if for_update:
+                    sql += " FOR UPDATE"
+                cursor.execute(sql, (pedido_id,))
+                l = cursor.fetchone()
+                if not l:
+                    return None
+                return ContaReceber(
+                    id=l['id'],
+                    pedido_id=l['pedido_id'],
+                    numero_pedido=l.get('numero_pedido'),
+                    cliente_id=l.get('cliente_id'),
+                    cliente_nome=l.get('cliente_nome'),
+                    cliente_cpf=l.get('cliente_cpf'),
+                    valor_original=float(l['valor_original']),
+                    valor_recebido=float(l['valor_recebido'] or 0.0),
+                    data_vencimento=l['data_vencimento'],
+                    status=l['status'],
+                    forma_pagamento=l.get('forma_pagamento') or "Boleto Bancário",
+                    observacoes=l.get('observacoes') or "",
+                    criado_em=l.get('criado_em')
+                )
+        finally:
+            if should_close: local_conn.close()
+
+    def atualizar_conta_receber(self, conta: ContaReceber, conn=None):
+        local_conn = conn or self._get_connection()
+        should_close = conn is None and self._connection is None
+        try:
+            with local_conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE contas_receber
+                    SET valor_recebido = %s, status = %s
+                    WHERE pedido_id = %s
+                    """,
+                    (conta.valor_recebido, conta._status, conta.pedido_id)
+                )
+                if conn is None:
+                    local_conn.commit()
+        finally:
+            if should_close: local_conn.close()
+
     def listar_contas_receber(self, busca: str = None, data_inicio: str = None, data_fim: str = None) -> list:
         conn = self._get_connection()
         should_close = self._connection is None
         try:
             with conn.cursor() as cursor:
+                # Consulta integrada à tabela contas_receber com fallback dinâmico para pedidos legados
                 sql = """
                     SELECT 
                         p.id AS pedido_id,
                         p.numero_pedido,
                         p.data_pedido,
                         p.valor_total,
+                        p.data_prevista_entrega,
                         p.status AS status_pedido,
                         p.status_pagamento,
                         p.forma_pagamento,
                         c.id AS cliente_id,
                         c.nome AS cliente_nome,
                         c.cpf AS cliente_cpf,
+                        cr.id AS conta_receber_id,
+                        cr.valor_recebido AS cr_valor_recebido,
+                        cr.data_vencimento AS cr_vencimento,
+                        cr.status AS cr_status,
                         COALESCE(SUM(CASE WHEN pr.tipo = 'Pagamento' AND pr.status = 'Confirmado' THEN pr.valor ELSE 0 END), 0.00) AS total_recebido
                     FROM pedidos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
+                    LEFT JOIN contas_receber cr ON cr.pedido_id = p.id
                     LEFT JOIN pagamentos_reembolsos pr ON pr.pedido_id = p.id
                     WHERE p.status NOT IN ('Cancelado', 'Recusado')
                       AND p.status_pagamento != 'Confirmado'
@@ -273,15 +361,42 @@ class FinanceiroRepository(BaseRepository):
                 linhas = cursor.fetchall() or []
                 
                 resultado = []
+                hoje = datetime.date.today()
                 for l in linhas:
                     vt = float(l['valor_total'])
                     rec = float(l['total_recebido'])
+                    if l.get('cr_valor_recebido') is not None:
+                        rec = max(rec, float(l['cr_valor_recebido']))
                     rest = max(0.0, round(vt - rec, 2))
-                    st_calc = "Parcialmente Pago" if rec > 0 and rest > 0 else "Pendente"
+
+                    # Determina data de vencimento
+                    venc = l.get('cr_vencimento') or l.get('data_prevista_entrega')
+                    if isinstance(venc, datetime.datetime):
+                        venc = venc.date()
+                    elif not venc and l.get('data_pedido'):
+                        dt_ped = l['data_pedido'] if isinstance(l['data_pedido'], (datetime.date, datetime.datetime)) else datetime.date.today()
+                        if isinstance(dt_ped, datetime.datetime): dt_ped = dt_ped.date()
+                        venc = dt_ped + datetime.timedelta(days=7)
+                    elif not venc:
+                        venc = hoje
+
+                    # Status calculado
+                    if rec >= vt - 0.001:
+                        st_calc = "Pago"
+                    elif venc < hoje:
+                        st_calc = "Vencido"
+                    elif rec > 0:
+                        st_calc = "Parcialmente Pago"
+                    else:
+                        st_calc = "Pendente"
+
                     resultado.append({
+                        "id": l.get('conta_receber_id'),
                         "pedido_id": l['pedido_id'],
-                        "numero_pedido": l['numero_pedido'] or f"PED-{l['pedido_id']}",
+                        "numero_pedido": l['numero_pedido'] or f"PED-{l['pedido_id']:04d}",
                         "data_pedido": formatar_data_br(l['data_pedido']),
+                        "data_vencimento": venc.strftime('%d/%m/%Y') if venc else "-",
+                        "data_vencimento_iso": venc.isoformat() if venc else None,
                         "cliente_nome": l.get('cliente_nome') or "Cliente Avulso",
                         "cliente_cpf": l.get('cliente_cpf') or "-",
                         "valor_total": vt,

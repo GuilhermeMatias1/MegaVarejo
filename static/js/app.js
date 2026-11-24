@@ -1204,6 +1204,10 @@ async function executarConfirmarPagamento(pedidoId) {
         fecharModal();
         carregarIndicadoresPedidos();
         carregarPedidos();
+        // Atualiza também os módulos financeiros se estiverem acessíveis
+        if (typeof carregarVisaoGeralFinanceiro === 'function') carregarVisaoGeralFinanceiro();
+        if (typeof carregarContasReceber === 'function') carregarContasReceber();
+        if (typeof carregarFluxoCaixa === 'function') carregarFluxoCaixa();
     } catch (err) {
         mostrarAlerta('Erro de conexão ao confirmar pagamento.', 'erro');
     }
@@ -2078,6 +2082,9 @@ async function confirmarRecebimentoPedido(event) {
         fecharModalRecebimento();
         carregarContasReceber();
         carregarVisaoGeralFinanceiro();
+        if (typeof carregarFluxoCaixa === 'function') carregarFluxoCaixa();
+        if (typeof carregarPedidos === 'function') carregarPedidos();
+        if (typeof carregarIndicadoresPedidos === 'function') carregarIndicadoresPedidos();
     } catch (err) {
         mostrarAlerta('Erro de conexão ao receber valor.', 'erro');
     }

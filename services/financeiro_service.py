@@ -294,6 +294,17 @@ class FinanceiroService:
                 conn=conn
             )
 
+            # Atualiza conta a receber vinculada (reduzindo valor recebido e atualizando status)
+            conta_rec = self._financeiro_repo.buscar_conta_receber_por_pedido(pedido.id, conn=conn, for_update=True)
+            if conta_rec:
+                novo_recebido = max(0.0, round(float(conta_rec.valor_recebido) - v, 2))
+                conta_rec.valor_recebido = novo_recebido
+                if novo_recebido <= 0:
+                    conta_rec._status = 'Cancelado' if pedido.status == 'Cancelado' else 'Pendente'
+                else:
+                    conta_rec._status = 'Parcialmente Pago'
+                self._financeiro_repo.atualizar_conta_receber(conta_rec, conn=conn)
+
             # Registra saída de caixa
             transacao = TransacaoCaixa(
                 operacao_id=operacao_id,

@@ -174,5 +174,132 @@ class TestAuthRBAC(unittest.TestCase):
         self.assertEqual(self.client.get('/api/clientes').status_code, 200)
         self.assertEqual(self.client.get('/api/usuarios').status_code, 200)
 
+    # 8. TESTE RBAC - PERFIL FINANCEIRO
+    @patch('app.get_db_connection')
+    def test_rbac_perfil_financeiro(self, mock_db_conn):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_db_conn.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchone.return_value = {'total_produtos': 10, 'total_pedidos': 5, 'total_vendas': 1500.0}
+
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 5
+            sess['usuario_perfil'] = 'Financeiro'
+
+        # Financeiro PODE acessar Dashboard, Pedidos (consulta) e Financeiro
+        self.assertEqual(self.client.get('/api/dashboard').status_code, 200)
+        self.assertEqual(self.client.get('/api/pedidos').status_code, 200)
+        self.assertEqual(self.client.get('/api/financeiro/visao-geral').status_code, 200)
+
+        # Financeiro NÃO PODE acessar Produtos/Estoque, Clientes ou Usuários
+        self.assertEqual(self.client.get('/api/produtos').status_code, 403)
+        self.assertEqual(self.client.get('/api/clientes').status_code, 403)
+        self.assertEqual(self.client.get('/api/usuarios').status_code, 403)
+
+    # 9. TESTE DE CRIAÇÃO DE PEDIDOS (ADMIN E VENDAS PODEM, OUTROS BLOQUEADOS)
+    @patch('services.pedido_service.DatabaseConnection.get_connection')
+    def test_criacao_pedidos_permissoes_e_bloqueios(self, mock_db):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_db.return_value = mock_conn
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        mock_cursor.fetchone.return_value = {
+            'id': 1,
+            'codigo': 'NOT-001',
+            'nome': 'Notebook Gamer',
+            'categoria': 'Informática',
+            'preco': 4500.00,
+            'estoque': 10,
+            'estoque_reservado': 0,
+            'estoque_minimo': 5
+        }
+        mock_cursor.lastrowid = 101
+
+        payload = {
+            'cliente_id': 1,
+            'forma_pagamento': 'PIX',
+            'itens': [{'produto_id': 1, 'quantidade': 2}]
+        }
+
+        # 9.1 Vendas PODE criar pedidos
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 3
+            sess['usuario_nome'] = 'Vendedor Teste'
+            sess['usuario_perfil'] = 'Vendas'
+
+        res_vendas = self.client.post('/api/pedidos', json=payload)
+        self.assertEqual(res_vendas.status_code, 201)
+        self.assertIn("reservados", res_vendas.get_json()['mensagem'])
+
+        # 9.2 Administrador PODE criar pedidos
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 1
+            sess['usuario_nome'] = 'Admin Teste'
+            sess['usuario_perfil'] = 'Administrador'
+
+        res_admin = self.client.post('/api/pedidos', json=payload)
+        self.assertEqual(res_admin.status_code, 201)
+
+        # 9.3 Estoquista NÃO PODE criar pedidos
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 2
+            sess['usuario_perfil'] = 'Estoque'
+
+        res_estoque = self.client.post('/api/pedidos', json=payload)
+        self.assertEqual(res_estoque.status_code, 403)
+
+        # 9.4 Financeiro NÃO PODE criar pedidos
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 5
+            sess['usuario_perfil'] = 'Financeiro'
+
+        res_fin = self.client.post('/api/pedidos', json=payload)
+        self.assertEqual(res_fin.status_code, 403)
+
+        # 9.5 Gerência NÃO PODE criar pedidos (apenas consulta e supervisão)
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 4
+            sess['usuario_perfil'] = 'Gerência'
+
+        res_ger = self.client.post('/api/pedidos', json=payload)
+        self.assertEqual(res_ger.status_code, 403)
+
+    # 10. TESTES DE PERMISSÕES GRANULARES POR OPERAÇÃO
+    def test_permissoes_granulares_especificas(self):
+        # 10.1 Vendas NÃO PODE confirmar pagamento manual
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 3
+            sess['usuario_perfil'] = 'Vendas'
+
+        res_pag_vendas = self.client.patch('/api/pedidos/1/pagamento', json={'status_pagamento': 'Confirmado'})
+        self.assertEqual(res_pag_vendas.status_code, 403)
+
+        # 10.2 Gerência NÃO PODE confirmar pagamento manual
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 4
+            sess['usuario_perfil'] = 'Gerência'
+
+        res_pag_ger = self.client.patch('/api/pedidos/1/pagamento', json={'status_pagamento': 'Confirmado'})
+        self.assertEqual(res_pag_ger.status_code, 403)
+
+        # 10.3 Gerência NÃO PODE cadastrar ou alterar clientes (apenas consulta)
+        res_cli_ger = self.client.post('/api/clientes', json={'nome': 'Novo Cli', 'email': 'cli@t.com', 'cpf': '12345678909'})
+        self.assertEqual(res_cli_ger.status_code, 403)
+
+        # 10.4 Gerência NÃO PODE alterar financeiro (pagar despesa)
+        res_fin_ger = self.client.post('/api/financeiro/contas-pagar/1/pagar', json={'valor': 100.0})
+        self.assertEqual(res_fin_ger.status_code, 403)
+
+        # 10.5 Financeiro NÃO PODE alterar status operacional de pedidos
+        with self.client.session_transaction() as sess:
+            sess['usuario_id'] = 5
+            sess['usuario_perfil'] = 'Financeiro'
+
+        res_stat_fin = self.client.patch('/api/pedidos/1/status', json={'status': 'Entregue'})
+        self.assertEqual(res_stat_fin.status_code, 403)
+
 if __name__ == '__main__':
     unittest.main()

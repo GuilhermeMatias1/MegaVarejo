@@ -324,6 +324,23 @@ CREATE TABLE IF NOT EXISTS transacoes_caixa (
 );
 
 
+-- 14. Tabela: contas_receber (Módulo Financeiro - Integração com Pedidos e Clientes)
+CREATE TABLE IF NOT EXISTS contas_receber (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pedido_id INT NOT NULL UNIQUE,
+    cliente_id INT DEFAULT NULL,
+    valor_original DECIMAL(10, 2) NOT NULL,
+    valor_recebido DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    data_vencimento DATE NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Pendente', -- 'Pendente', 'Parcialmente Pago', 'Pago', 'Cancelado'
+    forma_pagamento VARCHAR(50) DEFAULT 'Boleto Bancário',
+    observacoes TEXT DEFAULT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_contas_receber_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+    CONSTRAINT fk_contas_receber_cliente FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE SET NULL
+);
+
+
 -- Dados Iniciais / Testes
 INSERT INTO produtos (id, codigo, nome, categoria, preco, estoque, estoque_reservado, estoque_minimo) VALUES
 (1, 'NOT-001', 'Notebook Gamer', 'Informática', 4500.00, 10, 0, 5),

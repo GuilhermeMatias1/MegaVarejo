@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 import pymysql
 
 # Middlewares e Services
-from controllers.auth_middleware import login_required, require_permission
+from controllers.auth_middleware import login_required, require_permission, require_action
 from models.usuario import UsuarioFactory
 from services.produto_service import ProdutoService
 from services.pedido_service import PedidoService
@@ -255,6 +255,7 @@ def listar_historico_movimentacoes():
 @app.route('/api/estoque/movimentacoes', methods=['POST'])
 @login_required
 @require_permission('produtos')
+@require_action('movimentar_estoque')
 def registrar_movimentacao_estoque():
     dados = request.get_json() or {}
     produto_id = dados.get('produto_id')
@@ -284,6 +285,7 @@ def registrar_movimentacao_estoque():
 @app.route('/api/estoque/ajustes', methods=['POST'])
 @login_required
 @require_permission('produtos')
+@require_action('ajustar_estoque')
 def registrar_ajuste_estoque():
     dados = request.get_json() or {}
     produto_id = dados.get('produto_id')
@@ -381,12 +383,8 @@ def obter_pedido(pedido_id):
 @app.route('/api/pedidos', methods=['POST'])
 @login_required
 @require_permission('pedidos')
+@require_action('criar_pedido')
 def criar_pedido():
-    # Perfil Estoque não cria pedidos, apenas Vendedor/Gerente/Admin
-    perfil = session.get('usuario_perfil')
-    if perfil == 'Estoque':
-        return jsonify({"erro": "Perfil 'Estoque' não possui permissão para criar pedidos."}), 403
-
     dados = request.get_json() or {}
     itens = dados.get('itens', [])
     cliente_id = dados.get('cliente_id')
@@ -431,9 +429,13 @@ def atualizar_status_pedido(pedido_id):
     observacao = dados.get('observacao')
     responsavel = session.get('usuario_nome') or 'Usuário'
 
-    # RBAC Específico: Estoque só pode avançar Em Separação, Pronto para Envio, etc.
+    # RBAC Específico: Estoque só pode avançar Em Separação, Pronto para Envio e Enviado
     if perfil == 'Estoque' and novo_status not in ['Em Separação', 'Pronto para Envio', 'Enviado']:
-        return jsonify({"erro": f"Perfil 'Estoque' não tem permissão para alterar status para '{novo_status}'."}), 403
+        return jsonify({"erro": f"Perfil 'Estoque' só pode executar operações de separação e expedição ('Em Separação', 'Pronto para Envio', 'Enviado')."}), 403
+
+    # Financeiro não pode alterar status operacional do pedido
+    if perfil == 'Financeiro':
+        return jsonify({"erro": "Perfil 'Financeiro' não tem permissão para alterar status operacional de pedidos."}), 403
 
     try:
         resultado = pedido_service.atualizar_status(
@@ -452,43 +454,41 @@ def atualizar_status_pedido(pedido_id):
 
 @app.route('/api/pedidos/<int:pedido_id>/pagamento', methods=['PATCH'])
 @login_required
+@require_action('confirmar_pagamento')
 def confirmar_pagamento_pedido(pedido_id):
-    perfil = session.get('usuario_perfil')
-    # Confirmação pertence ao Financeiro, Gerência ou Admin
-    if perfil not in ['Financeiro', 'Gerência', 'Administrador']:
-        return jsonify({"erro": "A confirmação de pagamento é restrita ao perfil Financeiro, Gerência ou Administrador."}), 403
-
     dados = request.get_json() or {}
     novo_status_pagamento = dados.get('status_pagamento', 'Aprovado')
     transacao_id = dados.get('transacao_id')
     comprovante = dados.get('comprovante')
+    valor = dados.get('valor')
     responsavel = session.get('usuario_nome') or 'Operador Financeiro'
+    usuario_perfil = session.get('usuario_perfil')
 
     try:
         resultado = pedido_service.confirmar_pagamento(
             pedido_id=pedido_id,
             novo_status_pagamento=novo_status_pagamento,
             responsavel=responsavel,
+            usuario_perfil=usuario_perfil,
             transacao_id=transacao_id,
-            comprovante=comprovante
+            comprovante=comprovante,
+            valor=float(valor) if valor is not None else None
         )
         return jsonify(resultado)
     except KeyError as ke:
         return jsonify({"erro": str(ke).strip("'")}), 404
     except ValueError as ve:
         return jsonify({"erro": str(ve)}), 400
+    except PermissionError as pe:
+        return jsonify({"erro": str(pe)}), 403
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
 @app.route('/api/pedidos/<int:pedido_id>/cancelar', methods=['POST'])
 @login_required
 @require_permission('pedidos')
+@require_action('cancelar_pedido')
 def cancelar_pedido(pedido_id):
-    perfil = session.get('usuario_perfil')
-    # Cancelamento requer permissão de Gerência, Administrador ou Vendas
-    if perfil == 'Estoque':
-        return jsonify({"erro": "Perfil 'Estoque' não pode cancelar pedidos diretamente."}), 403
-
     dados = request.get_json() or {}
     motivo = dados.get('motivo')
     if not motivo:
@@ -513,6 +513,7 @@ def cancelar_pedido(pedido_id):
 @app.route('/api/pedidos/<int:pedido_id>/devolucao', methods=['POST'])
 @login_required
 @require_permission('pedidos')
+@require_action('solicitar_devolucao')
 def solicitar_devolucao_pedido(pedido_id):
     dados = request.get_json() or {}
     motivo = dados.get('motivo')
@@ -537,12 +538,8 @@ def solicitar_devolucao_pedido(pedido_id):
 
 @app.route('/api/pedidos/<int:pedido_id>/conferir-devolucao', methods=['POST'])
 @login_required
+@require_action('conferir_devolucao')
 def conferir_devolucao_pedido(pedido_id):
-    perfil = session.get('usuario_perfil')
-    # Conferência física cabe ao Estoque, Gerência ou Admin
-    if perfil not in ['Estoque', 'Gerência', 'Administrador']:
-        return jsonify({"erro": "A conferência de devolução é restrita ao Estoque, Gerência ou Administrador."}), 403
-
     dados = request.get_json() or {}
     condicao_itens = dados.get('condicao_itens', 'Itens conferidos em perfeito estado.')
     retornar_ao_estoque = dados.get('retornar_ao_estoque', True)
@@ -592,6 +589,7 @@ def obter_cliente(cliente_id):
 @app.route('/api/clientes', methods=['POST'])
 @login_required
 @require_permission('clientes')
+@require_action('cadastrar_cliente')
 def cadastrar_cliente():
     dados = request.get_json() or {}
     nome = dados.get('nome')
@@ -638,6 +636,7 @@ def cadastrar_cliente():
 @app.route('/api/clientes/<int:cliente_id>', methods=['PUT', 'PATCH'])
 @login_required
 @require_permission('clientes')
+@require_action('editar_cliente')
 def atualizar_cliente(cliente_id):
     dados = request.get_json() or {}
     nome = dados.get('nome')
@@ -686,6 +685,7 @@ def atualizar_cliente(cliente_id):
 @app.route('/api/clientes/<int:cliente_id>', methods=['DELETE'])
 @login_required
 @require_permission('clientes')
+@require_action('excluir_cliente')
 def excluir_cliente(cliente_id):
     try:
         resultado = cliente_service.excluir_cliente(cliente_id)
@@ -816,6 +816,7 @@ def listar_fornecedores():
 @app.route('/api/financeiro/fornecedores', methods=['POST'])
 @login_required
 @require_permission('financeiro')
+@require_action('cadastrar_fornecedor')
 def cadastrar_fornecedor():
     dados = request.get_json() or {}
     razao_social = dados.get('razao_social')
@@ -852,6 +853,7 @@ def listar_contas_pagar():
 @app.route('/api/financeiro/contas-pagar', methods=['POST'])
 @login_required
 @require_permission('financeiro')
+@require_action('cadastrar_despesa')
 def cadastrar_conta_pagar():
     dados = request.get_json() or {}
     descricao = dados.get('descricao')
@@ -879,6 +881,7 @@ def cadastrar_conta_pagar():
 @app.route('/api/financeiro/contas-pagar/<int:conta_id>/pagar', methods=['POST'])
 @login_required
 @require_permission('financeiro')
+@require_action('pagar_despesa')
 def pagar_conta_pagar(conta_id):
     dados = request.get_json() or {}
     valor = dados.get('valor')
@@ -923,6 +926,7 @@ def listar_contas_receber():
 @app.route('/api/financeiro/contas-receber/<int:pedido_id>/receber', methods=['POST'])
 @login_required
 @require_permission('financeiro')
+@require_action('confirmar_pagamento')
 def receber_pagamento_pedido(pedido_id):
     dados = request.get_json() or {}
     valor = dados.get('valor')
@@ -954,6 +958,7 @@ def receber_pagamento_pedido(pedido_id):
 @app.route('/api/financeiro/pedidos/<int:pedido_id>/estornar', methods=['POST'])
 @login_required
 @require_permission('financeiro')
+@require_action('registrar_reembolso')
 def estornar_pagamento_pedido(pedido_id):
     dados = request.get_json() or {}
     valor = dados.get('valor')

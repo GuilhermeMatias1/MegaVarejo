@@ -2,9 +2,12 @@ import datetime
 from database.connection import DatabaseConnection
 from models.pedido import Pedido, ItemPedido
 from models.movimentacao_estoque import MovimentacaoEstoque
+from models.financeiro import ContaReceber, TransacaoCaixa
+import uuid
 from repositories.pedido_repository import PedidoRepository
 from repositories.produto_repository import ProdutoRepository
 from repositories.movimentacao_repository import MovimentacaoRepository
+from repositories.financeiro_repository import FinanceiroRepository
 
 class PedidoService:
     """
@@ -18,10 +21,12 @@ class PedidoService:
     - Validação de permissões baseada no cargo do usuário (Vendedor, Estoquista, Gerente, Financeiro, Administrador).
     """
 
-    def __init__(self, pedido_repo: PedidoRepository = None, produto_repo: ProdutoRepository = None, mov_repo: MovimentacaoRepository = None):
+    def __init__(self, pedido_repo: PedidoRepository = None, produto_repo: ProdutoRepository = None,
+                 mov_repo: MovimentacaoRepository = None, financeiro_repo: FinanceiroRepository = None):
         self._pedido_repo = pedido_repo or PedidoRepository()
         self._produto_repo = produto_repo or ProdutoRepository()
         self._mov_repo = mov_repo or MovimentacaoRepository()
+        self._financeiro_repo = financeiro_repo or FinanceiroRepository()
 
     def listar_pedidos(self, busca: str = None, status_pedido: str = None, status_pagamento: str = None,
                        data_inicio: str = None, data_fim: str = None, apenas_atrasados: bool = False) -> list:
@@ -152,6 +157,21 @@ class PedidoService:
                 conn=conn
             )
 
+            # Integração com Contas a Receber (Módulo Financeiro):
+            # Gera a conta a receber vinculada ao pedido e cliente na mesma transação atômica
+            vencimento_conta = data_prevista_entrega or (datetime.date.today() + datetime.timedelta(days=7))
+            conta_receber = ContaReceber(
+                pedido_id=pedido_id,
+                cliente_id=cliente_id,
+                valor_original=pedido.valor_total,
+                valor_recebido=0.0,
+                data_vencimento=vencimento_conta,
+                status='Pendente',
+                forma_pagamento=forma_pagamento,
+                observacoes=f"Conta a receber gerada automaticamente na criação do Pedido #{pedido_id}"
+            )
+            self._financeiro_repo.criar_conta_receber(conta_receber, conn=conn)
+
             conn.commit()
 
             return {
@@ -238,10 +258,11 @@ class PedidoService:
 
     def confirmar_pagamento(self, pedido_id: int, responsavel: str = "Financeiro", usuario_perfil: str = None,
                             novo_status_pagamento: str = "Confirmado", transacao_id: str = None,
-                            comprovante: str = None) -> dict:
+                            comprovante: str = None, valor: float = None) -> dict:
         """
         Confirmação de pagamento (Módulo Financeiro / Gerência / Admin).
         Após o pagamento confirmado, o pedido transita automaticamente para 'Confirmado' / 'Aguardando Separação'.
+        Atualiza a conta a receber correspondente e gera entrada efetiva no Fluxo de Caixa.
         """
         if usuario_perfil not in ['Financeiro', 'Gerência', 'Administrador', None]:
             raise PermissionError("Apenas os perfis Financeiro, Gerência e Administrador podem confirmar pagamentos.")
@@ -255,15 +276,95 @@ class PedidoService:
             if pedido.status in ['Cancelado', 'Devolvido', 'Recusado']:
                 raise ValueError(f"Não é possível confirmar pagamento de um pedido com status '{pedido.status}'.")
 
-            # Atualiza status_pagamento para o novo status (padrão: Confirmado)
-            status_pag_final = novo_status_pagamento if novo_status_pagamento in ['Confirmado', 'Recusado', 'Reembolsado'] else "Confirmado"
+            # Verifica quanto já foi pago anteriormente
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(valor), 0.00) AS total_recebido
+                    FROM pagamentos_reembolsos
+                    WHERE pedido_id = %s AND tipo = 'Pagamento' AND status = 'Confirmado'
+                    FOR UPDATE
+                    """,
+                    (pedido_id,)
+                )
+                total_ja_recebido = float(cursor.fetchone().get('total_recebido') or 0.0)
+
+            saldo_pendente = max(0.0, round(pedido.valor_total - total_ja_recebido, 2))
+
+            # Se valor não foi especificado, quita o saldo pendente restante
+            v_recebido = round(float(valor) if valor is not None else saldo_pendente, 2)
+            if v_recebido <= 0 and saldo_pendente > 0:
+                raise ValueError("O valor de pagamento deve ser positivo maior que zero.")
+            if v_recebido > saldo_pendente + 0.001:
+                raise ValueError(f"O valor de R$ {v_recebido:.2f} excede o saldo pendente de R$ {saldo_pendente:.2f}.")
+
+            # Gera operacao_id único para idempotência
+            operacao_id = transacao_id or f"PED-PG-{pedido_id}-{uuid.uuid4().hex[:12]}"
+            if self._financeiro_repo.existe_operacao_caixa(operacao_id, conn=conn):
+                raise ValueError("Esta transação de pagamento já foi registrada no caixa anteriormente.")
+
+            # Registra o pagamento na tabela pagamentos_reembolsos
+            if v_recebido > 0:
+                self._financeiro_repo.registrar_pagamento_reembolso(
+                    pedido_id=pedido.id,
+                    tipo='Pagamento',
+                    valor=v_recebido,
+                    forma_pagamento=pedido.forma_pagamento or "PIX",
+                    status='Confirmado',
+                    operacao_id=operacao_id,
+                    confirmado_por=responsavel,
+                    comprovante=comprovante,
+                    conn=conn
+                )
+
+                # Registra a entrada no Fluxo de Caixa efetivo
+                transacao_caixa = TransacaoCaixa(
+                    operacao_id=operacao_id,
+                    tipo='Entrada',
+                    origem='Pedido',
+                    referencia_id=pedido.id,
+                    valor=v_recebido,
+                    forma_pagamento=pedido.forma_pagamento or "PIX",
+                    descricao=f"Recebimento de Pedido #{pedido.numero_pedido or pedido.id}",
+                    responsavel=responsavel
+                )
+                self._financeiro_repo.registrar_transacao_caixa(transacao_caixa, conn=conn)
+
+            novo_total_recebido = round(total_ja_recebido + v_recebido, 2)
+            esta_totalmente_pago = novo_total_recebido >= round(pedido.valor_total, 2) - 0.001
+
+            status_pag_final = "Confirmado" if esta_totalmente_pago else "Parcialmente Pago"
+
+            # Atualiza status_pagamento no pedido
             self._pedido_repo.atualizar_status_pagamento(pedido.id, status_pag_final, conn=conn)
 
-            # Transita status_pedido para Confirmado se estiver Aguardando Pagamento e pagamento aprovado
+            # Transita status_pedido para Confirmado se estiver Aguardando Pagamento e totalmente pago
             if pedido.status == 'Aguardando Pagamento' and status_pag_final == 'Confirmado':
                 self._pedido_repo.atualizar_status(pedido.id, "Confirmado", conn=conn)
 
-            obs_historico = "Pagamento conciliado e aprovado pelo Financeiro."
+            # Atualiza a tabela contas_receber vinculada
+            conta_rec = self._financeiro_repo.buscar_conta_receber_por_pedido(pedido.id, conn=conn, for_update=True)
+            if conta_rec:
+                conta_rec.valor_recebido = novo_total_recebido
+                if esta_totalmente_pago:
+                    conta_rec._status = 'Pago'
+                else:
+                    conta_rec._status = 'Parcialmente Pago'
+                self._financeiro_repo.atualizar_conta_receber(conta_rec, conn=conn)
+            else:
+                # Se não existia ainda (legado), cria a conta a receber
+                nova_cr = ContaReceber(
+                    pedido_id=pedido.id,
+                    cliente_id=pedido.cliente_id,
+                    valor_original=pedido.valor_total,
+                    valor_recebido=novo_total_recebido,
+                    data_vencimento=pedido.data_prevista_entrega or datetime.date.today(),
+                    status='Pago' if esta_totalmente_pago else 'Parcialmente Pago',
+                    forma_pagamento=pedido.forma_pagamento or "Boleto Bancário"
+                )
+                self._financeiro_repo.criar_conta_receber(nova_cr, conn=conn)
+
+            obs_historico = f"Pagamento de R$ {v_recebido:.2f} confirmado ({status_pag_final})."
             if transacao_id:
                 obs_historico += f" Transação: {transacao_id}."
             if comprovante:
@@ -280,7 +381,12 @@ class PedidoService:
             )
 
             conn.commit()
-            return {"mensagem": f"Pagamento atualizado para '{status_pag_final}' com sucesso!"}
+            return {
+                "mensagem": f"Pagamento de R$ {v_recebido:.2f} registrado com sucesso! Status: '{status_pag_final}'.",
+                "status_pagamento": status_pag_final,
+                "valor_recebido": v_recebido,
+                "saldo_restante": max(0.0, round(pedido.valor_total - novo_total_recebido, 2))
+            }
 
         except Exception:
             conn.rollback()
@@ -326,6 +432,12 @@ class PedidoService:
                         responsavel=responsavel
                     )
                     self._mov_repo.salvar_transacional(mov, conn)
+
+            # 2. Atualiza a conta a receber vinculada (se existir)
+            conta_rec = self._financeiro_repo.buscar_conta_receber_por_pedido(pedido.id, conn=conn, for_update=True)
+            if conta_rec:
+                conta_rec.cancelar()
+                self._financeiro_repo.atualizar_conta_receber(conta_rec, conn=conn)
 
             # Atualiza status
             self._pedido_repo.atualizar_status(pedido.id, "Cancelado", conn=conn)

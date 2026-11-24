@@ -40,3 +40,33 @@ def require_permission(modulo):
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+def require_action(acao):
+    """
+    Decorador RBAC granular para ações e operações específicas (POLIMORFISMO):
+    Instancia o objeto de usuário da sessão e executa 'usuario.pode_executar(acao)'.
+    Garante que acesso de consulta a uma aba não conceda acesso a operações de escrita/mutação.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'usuario_id' not in session:
+                return jsonify({'erro': 'Usuário não autenticado.'}), 401
+
+            perfil_nome = session.get('usuario_perfil')
+            nome_sessao = session.get('usuario_nome') or 'Usuário'
+            email_sessao = session.get('usuario_email') or 'usuario@megavarejo.com'
+            usuario_obj = UsuarioFactory.criar_usuario(
+                perfil_nome=perfil_nome,
+                nome=nome_sessao,
+                email=email_sessao,
+                id=session.get('usuario_id')
+            )
+
+            # Validação polimórfica da ação
+            if not usuario_obj.pode_executar(acao):
+                return jsonify({'erro': f'Operação não permitida. O perfil [{perfil_nome}] não tem permissão para a ação [{acao}].'}), 403
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator

@@ -7,7 +7,7 @@ class MovimentacaoEstoque:
     Demonstra ENCAPSULAMENTO validando tipos permitidos (Entrada, Saída, Ajuste) e consistência.
     """
 
-    TIPOS_VALIDOS = ['Entrada', 'Saída', 'Ajuste']
+    TIPOS_VALIDOS = ['Entrada', 'Saída', 'Ajuste', 'Reserva', 'Liberação']
 
     def __init__(self, produto_id: int, tipo: str, quantidade: int,
                  saldo_anterior: int, novo_saldo: int, motivo: str,

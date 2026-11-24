@@ -240,6 +240,153 @@ class ContaPagar:
         }
 
 
+class ContaReceber:
+    """
+    Entidade de domínio ContaReceber.
+    Vinculada diretamente ao Pedido e ao Cliente, gerencia valor faturado,
+    valor recebido, saldo pendente, data de vencimento e status dinâmico.
+    Demonstra ENCAPSULAMENTO.
+    """
+    STATUS_VALIDOS = {'Pendente', 'Parcialmente Pago', 'Pago', 'Cancelado'}
+
+    def __init__(self, pedido_id: int, valor_original: float, data_vencimento,
+                 cliente_id: int = None, cliente_nome: str = None, cliente_cpf: str = None,
+                 numero_pedido: str = None, valor_recebido: float = 0.0,
+                 status: str = "Pendente", forma_pagamento: str = "Boleto Bancário",
+                 observacoes: str = "", criado_em=None, id: int = None):
+        self._id = id
+        self._pedido_id = int(pedido_id)
+        self._cliente_id = cliente_id
+        self._cliente_nome = cliente_nome or "Cliente Não Identificado"
+        self._cliente_cpf = cliente_cpf or "-"
+        self._numero_pedido = numero_pedido or f"PED-{pedido_id:04d}"
+        self.valor_original = valor_original
+        self.valor_recebido = valor_recebido
+        self.data_vencimento = data_vencimento
+        self._status = status if status in self.STATUS_VALIDOS else "Pendente"
+        self._forma_pagamento = forma_pagamento or "Boleto Bancário"
+        self._observacoes = observacoes or ""
+        self._criado_em = criado_em or datetime.datetime.now()
+
+    @property
+    def id(self) -> Optional[int]:
+        return self._id
+
+    @property
+    def pedido_id(self) -> int:
+        return self._pedido_id
+
+    @property
+    def cliente_id(self) -> Optional[int]:
+        return self._cliente_id
+
+    @property
+    def cliente_nome(self) -> str:
+        return self._cliente_nome
+
+    @property
+    def cliente_cpf(self) -> str:
+        return self._cliente_cpf
+
+    @property
+    def numero_pedido(self) -> str:
+        return self._numero_pedido
+
+    @property
+    def valor_original(self) -> float:
+        return self._valor_original
+
+    @valor_original.setter
+    def valor_original(self, valor):
+        v = float(valor or 0.0)
+        if v <= 0:
+            raise ValueError("O valor da conta a receber deve ser maior que zero.")
+        self._valor_original = round(v, 2)
+
+    @property
+    def valor_recebido(self) -> float:
+        return self._valor_recebido
+
+    @valor_recebido.setter
+    def valor_recebido(self, valor):
+        v = float(valor or 0.0)
+        if v < 0:
+            raise ValueError("O valor recebido não pode ser negativo.")
+        self._valor_recebido = round(v, 2)
+
+    @property
+    def valor_restante(self) -> float:
+        return max(0.0, round(self._valor_original - self._valor_recebido, 2))
+
+    @property
+    def data_vencimento(self):
+        return self._data_vencimento
+
+    @data_vencimento.setter
+    def data_vencimento(self, valor):
+        if isinstance(valor, str):
+            try:
+                self._data_vencimento = datetime.datetime.strptime(valor[:10], '%Y-%m-%d').date()
+            except ValueError:
+                self._data_vencimento = datetime.date.today()
+        elif isinstance(valor, datetime.datetime):
+            self._data_vencimento = valor.date()
+        elif isinstance(valor, datetime.date):
+            self._data_vencimento = valor
+        else:
+            self._data_vencimento = datetime.date.today()
+
+    @property
+    def status_calculado(self) -> str:
+        if self._status == 'Cancelado':
+            return 'Cancelado'
+        if self._valor_recebido >= self._valor_original - 0.001:
+            return 'Pago'
+        hoje = datetime.date.today()
+        if self._data_vencimento < hoje:
+            return 'Vencido'
+        if self._valor_recebido > 0:
+            return 'Parcialmente Pago'
+        return 'Pendente'
+
+    def registrar_recebimento(self, valor: float):
+        v = float(valor or 0.0)
+        if v <= 0:
+            raise ValueError("O valor recebido deve ser maior que zero.")
+        if v > self.valor_restante + 0.001:
+            raise ValueError(f"O valor de R$ {v:.2f} excede o saldo pendente de R$ {self.valor_restante:.2f}.")
+
+        self.valor_recebido = round(self._valor_recebido + v, 2)
+        if self._valor_recebido >= self._valor_original - 0.001:
+            self._status = 'Pago'
+        else:
+            self._status = 'Parcialmente Pago'
+
+    def cancelar(self):
+        self._status = 'Cancelado'
+
+    def to_dict(self) -> dict:
+        venc_str = self._data_vencimento.strftime('%d/%m/%Y') if self._data_vencimento else "-"
+        return {
+            "id": self._id,
+            "pedido_id": self._pedido_id,
+            "numero_pedido": self._numero_pedido,
+            "cliente_id": self._cliente_id,
+            "cliente_nome": self._cliente_nome,
+            "cliente_cpf": self._cliente_cpf,
+            "valor_original": self._valor_original,
+            "valor_recebido": self._valor_recebido,
+            "valor_restante": self.valor_restante,
+            "data_vencimento": venc_str,
+            "data_vencimento_iso": self._data_vencimento.isoformat() if self._data_vencimento else None,
+            "status": self._status,
+            "status_calculado": self.status_calculado,
+            "forma_pagamento": self._forma_pagamento,
+            "observacoes": self._observacoes or "",
+            "criado_em": formatar_data_br(self._criado_em)
+        }
+
+
 class TransacaoCaixa:
     """
     Entidade de domínio TransacaoCaixa (Livro-Caixa / Histórico Efetivo).
