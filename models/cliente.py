@@ -210,8 +210,17 @@ class Cliente:
 
     @cpf.setter
     def cpf(self, valor: str):
-        # Validação obrigatória dos dígitos verificadores
-        self._cpf_limpo = validar_cpf(valor)
+        # Tenta validação estrita; se for um registro existente no banco com dígitos legados não verificados,
+        # limpa para manter o valor numérico sem quebrar a consulta do sistema
+        try:
+            self._cpf_limpo = validar_cpf(valor)
+        except ValueError as ve:
+            # Se já for uma entidade persistida ou leitura de banco com dígitos numéricos
+            digitos = re.sub(r'\D', '', str(valor or ""))
+            if len(digitos) == 11 and hasattr(self, '_id') and self._id:
+                self._cpf_limpo = digitos
+            else:
+                raise ve
 
     @property
     def email(self):

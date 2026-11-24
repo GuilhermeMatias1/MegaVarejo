@@ -90,7 +90,7 @@ async function checarAutenticacao() {
 }
 
 function aplicarPermissoesMenu(permissoes) {
-    const modulos = ['dashboard', 'produtos', 'pedidos', 'clientes', 'usuarios'];
+    const modulos = ['dashboard', 'produtos', 'pedidos', 'clientes', 'usuarios', 'financeiro'];
     modulos.forEach(mod => {
         const btn = document.getElementById(`nav-btn-${mod}`);
         if (btn) {
@@ -148,6 +148,9 @@ function navegarPara(moduloId) {
     if (containerId === 'usuarios') {
         carregarPerfisParaSelect();
         carregarUsuarios();
+    }
+    if (containerId === 'financeiro') {
+        carregarModuloFinanceiro();
     }
 }
 
@@ -1781,6 +1784,434 @@ async function tratarErroAcesso(resposta) {
 }
 
 // Iniciar verificando autenticação do usuário
+
+// ==========================================
+// 6. MÓDULO FINANCEIRO
+// ==========================================
+
+function alternarAbaFinanceiro(subAbaId) {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.id.startsWith('tab-btn-fin-')) btn.classList.remove('active');
+    });
+    document.querySelectorAll('.sub-fin-content').forEach(content => {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+
+    const btnAtivo = document.getElementById(`tab-btn-fin-${subAbaId}`);
+    if (btnAtivo) btnAtivo.classList.add('active');
+
+    const contentAtivo = document.getElementById(`sub-fin-${subAbaId}`);
+    if (contentAtivo) {
+        contentAtivo.classList.add('active');
+        contentAtivo.style.display = 'block';
+    }
+
+    if (subAbaId === 'visao') carregarVisaoGeralFinanceiro();
+    if (subAbaId === 'pagar') carregarContasPagar();
+    if (subAbaId === 'receber') carregarContasReceber();
+    if (subAbaId === 'caixa') carregarFluxoCaixa();
+    if (subAbaId === 'fornecedores') carregarFornecedores();
+}
+
+function carregarModuloFinanceiro() {
+    alternarAbaFinanceiro('visao');
+}
+
+// 6.1 Visão Geral
+async function carregarVisaoGeralFinanceiro() {
+    try {
+        const res = await fetch('/api/financeiro/visao-geral');
+        if (res.status === 401 || res.status === 403) {
+            tratarErroAcesso(res);
+            return;
+        }
+        const d = await res.json();
+
+        document.getElementById('fin-saldo-caixa').textContent = formatarMoeda(d.saldo_disponivel || 0);
+        document.getElementById('fin-receitas-totais').textContent = formatarMoeda(d.receitas_totais || 0);
+        document.getElementById('fin-despesas-totais').textContent = formatarMoeda(d.despesas_totais || 0);
+
+        const resElem = document.getElementById('fin-resultado-simplificado');
+        const resValor = d.resultado_operacional_simplificado || 0;
+        resElem.textContent = formatarMoeda(resValor);
+        resElem.style.color = resValor >= 0 ? '#10b981' : '#ef4444';
+
+        document.getElementById('fin-receber-pendente').textContent = formatarMoeda(d.contas_a_receber || 0);
+        document.getElementById('fin-pagar-pendente').textContent = formatarMoeda(d.contas_a_pagar_pendentes || 0);
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar visão geral financeira.', 'erro');
+    }
+}
+
+// 6.2 Contas a Pagar
+async function carregarContasPagar() {
+    try {
+        const status = document.getElementById('filtro-cp-status').value;
+        const url = status && status !== 'Todos' ? `/api/financeiro/contas-pagar?status=${encodeURIComponent(status)}` : '/api/financeiro/contas-pagar';
+        const res = await fetch(url);
+        if (res.status === 401 || res.status === 403) {
+            tratarErroAcesso(res);
+            return;
+        }
+        const contas = await res.json();
+        const tbody = document.getElementById('tabela-contas-pagar-corpo');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(contas) || contas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #64748b;">Nenhuma conta a pagar encontrada.</td></tr>';
+            return;
+        }
+
+        contas.forEach(c => {
+            const tr = document.createElement('tr');
+            let badgeClass = 'badge-pendente';
+            const st = c.status_calculado;
+            if (st === 'Pago') badgeClass = 'badge-entregue';
+            else if (st === 'Vencido') badgeClass = 'badge-cancelado';
+            else if (st === 'Parcialmente Pago') badgeClass = 'badge-separacao';
+
+            const btnAcao = (st !== 'Pago' && st !== 'Cancelado')
+                ? `<button class="btn btn-primary btn-sm" onclick="abrirModalBaixaConta(${c.id}, '${c.descricao}', ${c.valor_restante})">💳 Pagar</button>`
+                : `<span style="color: #94a3b8; font-size: 0.85rem;">Quitado</span>`;
+
+            tr.innerHTML = `
+                <td>#${c.id}</td>
+                <td><strong>${c.descricao}</strong></td>
+                <td>${c.fornecedor_nome || '-'}</td>
+                <td><span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${c.categoria}</span></td>
+                <td>${formatarMoeda(c.valor_original)}</td>
+                <td style="color: ${c.valor_restante > 0 ? '#ef4444' : '#10b981'}; font-weight: 600;">${formatarMoeda(c.valor_restante)}</td>
+                <td>${c.data_vencimento}</td>
+                <td><span class="badge ${badgeClass}">${st}</span></td>
+                <td>${btnAcao}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar contas a pagar.', 'erro');
+    }
+}
+
+async function abrirModalNovaContaPagar() {
+    // Carrega fornecedores no select
+    try {
+        const res = await fetch('/api/financeiro/fornecedores');
+        if (res.ok) {
+            const fornecedores = await res.json();
+            const sel = document.getElementById('cp-fornecedor-id');
+            sel.innerHTML = '<option value="">Selecione um fornecedor (opcional)</option>';
+            fornecedores.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.id;
+                opt.textContent = `${f.razao_social} (${f.cnpj_cpf || 'S/ CPF/CNPJ'})`;
+                sel.appendChild(opt);
+            });
+        }
+    } catch (e) {}
+
+    document.getElementById('form-conta-pagar').reset();
+    document.getElementById('modal-conta-pagar').style.display = 'block';
+}
+
+function fecharModalContaPagar() {
+    document.getElementById('modal-conta-pagar').style.display = 'none';
+}
+
+async function salvarContaPagar(event) {
+    event.preventDefault();
+    const descricao = document.getElementById('cp-descricao').value.trim();
+    const fornecedor_id = document.getElementById('cp-fornecedor-id').value || null;
+    const categoria = document.getElementById('cp-categoria').value.trim();
+    const valor = parseFloat(document.getElementById('cp-valor').value);
+    const data_vencimento = document.getElementById('cp-vencimento').value;
+    const observacoes = document.getElementById('cp-observacoes').value.trim();
+
+    try {
+        const res = await fetch('/api/financeiro/contas-pagar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ descricao, fornecedor_id, categoria, valor, data_vencimento, observacoes })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao cadastrar conta.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem);
+        fecharModalContaPagar();
+        carregarContasPagar();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao salvar conta.', 'erro');
+    }
+}
+
+function abrirModalBaixaConta(id, descricao, valorRestante) {
+    document.getElementById('baixa-cp-id').value = id;
+    document.getElementById('baixa-cp-info').textContent = `Conta #${id} - ${descricao} | Saldo a liquidar: ${formatarMoeda(valorRestante)}`;
+    document.getElementById('baixa-cp-valor').value = valorRestante.toFixed(2);
+    document.getElementById('baixa-cp-valor').max = valorRestante;
+    document.getElementById('baixa-cp-comprovante').value = '';
+    document.getElementById('modal-pagar-conta').style.display = 'block';
+}
+
+function fecharModalBaixaConta() {
+    document.getElementById('modal-pagar-conta').style.display = 'none';
+}
+
+async function confirmarPagamentoContaPagar(event) {
+    event.preventDefault();
+    const id = document.getElementById('baixa-cp-id').value;
+    const valor = parseFloat(document.getElementById('baixa-cp-valor').value);
+    const forma_pagamento = document.getElementById('baixa-cp-forma').value;
+    const comprovante = document.getElementById('baixa-cp-comprovante').value.trim();
+
+    // Gera um identificador único de operação para prevenir requisições duplicadas
+    const operacao_id = `CP-UI-${id}-${Date.now()}-${Math.floor(Math.random()*1000000)}`;
+
+    try {
+        const res = await fetch(`/api/financeiro/contas-pagar/${id}/pagar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valor, forma_pagamento, comprovante, operacao_id })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao processar pagamento.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem);
+        fecharModalBaixaConta();
+        carregarContasPagar();
+        carregarVisaoGeralFinanceiro();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao pagar despesa.', 'erro');
+    }
+}
+
+// 6.3 Contas a Receber
+let timeoutBuscaReceber = null;
+function filtrarContasReceber() {
+    clearTimeout(timeoutBuscaReceber);
+    timeoutBuscaReceber = setTimeout(() => {
+        carregarContasReceber();
+    }, 300);
+}
+
+async function carregarContasReceber() {
+    try {
+        const busca = document.getElementById('busca-contas-receber').value.trim();
+        const url = busca ? `/api/financeiro/contas-receber?busca=${encodeURIComponent(busca)}` : '/api/financeiro/contas-receber';
+        const res = await fetch(url);
+        if (res.status === 401 || res.status === 403) {
+            tratarErroAcesso(res);
+            return;
+        }
+        const contas = await res.json();
+        const tbody = document.getElementById('tabela-contas-receber-corpo');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(contas) || contas.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #64748b;">Nenhum valor a receber pendente.</td></tr>';
+            return;
+        }
+
+        contas.forEach(c => {
+            const tr = document.createElement('tr');
+            const badgeClass = c.status_calculado === 'Parcialmente Pago' ? 'badge-separacao' : 'badge-pendente';
+
+            tr.innerHTML = `
+                <td><strong>${c.numero_pedido}</strong></td>
+                <td>${c.cliente_nome}<br><small style="color: #64748b;">CPF: ${c.cliente_cpf}</small></td>
+                <td>${c.data_pedido}</td>
+                <td>${c.forma_pagamento}</td>
+                <td>${formatarMoeda(c.valor_total)}</td>
+                <td style="color: #10b981; font-weight: 600;">${formatarMoeda(c.valor_recebido)}</td>
+                <td style="color: #ef4444; font-weight: 600;">${formatarMoeda(c.valor_restante)}</td>
+                <td><span class="badge ${badgeClass}">${c.status_calculado}</span></td>
+                <td>
+                    <button class="btn btn-primary btn-sm" onclick="abrirModalRecebimento(${c.pedido_id}, '${c.numero_pedido}', '${c.cliente_nome}', ${c.valor_restante})">📥 Receber</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar contas a receber.', 'erro');
+    }
+}
+
+function abrirModalRecebimento(pedidoId, numeroPedido, clienteNome, saldoRestante) {
+    document.getElementById('receber-ped-id').value = pedidoId;
+    document.getElementById('receber-ped-info').textContent = `Pedido ${numeroPedido} - ${clienteNome} | Saldo a receber: ${formatarMoeda(saldoRestante)}`;
+    document.getElementById('receber-ped-valor').value = saldoRestante.toFixed(2);
+    document.getElementById('receber-ped-valor').max = saldoRestante;
+    document.getElementById('receber-ped-comprovante').value = '';
+    document.getElementById('modal-receber-pedido').style.display = 'block';
+}
+
+function fecharModalRecebimento() {
+    document.getElementById('modal-receber-pedido').style.display = 'none';
+}
+
+async function confirmarRecebimentoPedido(event) {
+    event.preventDefault();
+    const pedidoId = document.getElementById('receber-ped-id').value;
+    const valor = parseFloat(document.getElementById('receber-ped-valor').value);
+    const forma_pagamento = document.getElementById('receber-ped-forma').value;
+    const comprovante = document.getElementById('receber-ped-comprovante').value.trim();
+
+    // Identificador único da transação para proteção contra pagamentos duplicados
+    const operacao_id = `REC-UI-${pedidoId}-${Date.now()}-${Math.floor(Math.random()*1000000)}`;
+
+    try {
+        const res = await fetch(`/api/financeiro/contas-receber/${pedidoId}/receber`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ valor, forma_pagamento, comprovante, operacao_id })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao confirmar recebimento.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem);
+        fecharModalRecebimento();
+        carregarContasReceber();
+        carregarVisaoGeralFinanceiro();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao receber valor.', 'erro');
+    }
+}
+
+// 6.4 Fluxo de Caixa / Transações Efetivas
+async function carregarFluxoCaixa() {
+    try {
+        const tipo = document.getElementById('filtro-caixa-tipo').value;
+        const origem = document.getElementById('filtro-caixa-origem').value;
+        let params = [];
+        if (tipo && tipo !== 'Todos') params.push(`tipo=${encodeURIComponent(tipo)}`);
+        if (origem && origem !== 'Todos') params.push(`origem=${encodeURIComponent(origem)}`);
+        const qs = params.length > 0 ? `?${params.join('&')}` : '';
+
+        const res = await fetch(`/api/financeiro/fluxo-caixa${qs}`);
+        if (res.status === 401 || res.status === 403) {
+            tratarErroAcesso(res);
+            return;
+        }
+        const transacoes = await res.json();
+        const tbody = document.getElementById('tabela-fluxo-caixa-corpo');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(transacoes) || transacoes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #64748b;">Nenhuma movimentação de caixa registrada.</td></tr>';
+            return;
+        }
+
+        transacoes.forEach(t => {
+            const tr = document.createElement('tr');
+            const isEntrada = t.tipo === 'Entrada';
+            const corTipo = isEntrada ? '#10b981' : '#ef4444';
+            const sinal = isEntrada ? '+' : '-';
+
+            tr.innerHTML = `
+                <td>${t.data_transacao}</td>
+                <td><code style="font-size: 0.75rem;">${t.operacao_id}</code></td>
+                <td><span style="color: ${corTipo}; font-weight: bold;">${t.tipo}</span></td>
+                <td><span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${t.origem}</span></td>
+                <td>${t.descricao}</td>
+                <td>${t.forma_pagamento}</td>
+                <td style="color: ${corTipo}; font-weight: 600;">${sinal} ${formatarMoeda(t.valor)}</td>
+                <td style="font-weight: 600;">${formatarMoeda(t.saldo_resultante)}</td>
+                <td>${t.responsavel}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar fluxo de caixa.', 'erro');
+    }
+}
+
+// 6.5 Fornecedores
+let timeoutBuscaFornecedor = null;
+function filtrarFornecedores() {
+    clearTimeout(timeoutBuscaFornecedor);
+    timeoutBuscaFornecedor = setTimeout(() => {
+        carregarFornecedores();
+    }, 300);
+}
+
+async function carregarFornecedores() {
+    try {
+        const busca = document.getElementById('busca-fornecedores').value.trim();
+        const url = busca ? `/api/financeiro/fornecedores?busca=${encodeURIComponent(busca)}` : '/api/financeiro/fornecedores';
+        const res = await fetch(url);
+        if (res.status === 401 || res.status === 403) {
+            tratarErroAcesso(res);
+            return;
+        }
+        const fornecedores = await res.json();
+        const tbody = document.getElementById('tabela-fornecedores-corpo');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #64748b;">Nenhum fornecedor cadastrado.</td></tr>';
+            return;
+        }
+
+        fornecedores.forEach(f => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>#${f.id}</td>
+                <td><strong>${f.razao_social}</strong></td>
+                <td><code>${f.cnpj_cpf}</code></td>
+                <td>${f.email}</td>
+                <td>${f.telefone}</td>
+                <td><span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${f.categoria}</span></td>
+                <td>${f.criado_em}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar fornecedores.', 'erro');
+    }
+}
+
+function abrirModalNovoFornecedor() {
+    document.getElementById('form-fornecedor').reset();
+    document.getElementById('modal-fornecedor').style.display = 'block';
+}
+
+function fecharModalNovoFornecedor() {
+    document.getElementById('modal-fornecedor').style.display = 'none';
+}
+
+async function salvarFornecedor(event) {
+    event.preventDefault();
+    const razao_social = document.getElementById('forn-razao').value.trim();
+    const cnpj_cpf = document.getElementById('forn-cnpj').value.trim();
+    const categoria = document.getElementById('forn-categoria').value.trim();
+    const email = document.getElementById('forn-email').value.trim();
+    const telefone = document.getElementById('forn-telefone').value.trim();
+
+    try {
+        const res = await fetch('/api/financeiro/fornecedores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ razao_social, cnpj_cpf, categoria, email, telefone })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao cadastrar fornecedor.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem);
+        fecharModalNovoFornecedor();
+        carregarFornecedores();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao salvar fornecedor.', 'erro');
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     checarAutenticacao();
 });

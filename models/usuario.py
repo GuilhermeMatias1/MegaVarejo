@@ -118,7 +118,7 @@ class Administrador(Usuario):
     Especialização Administrador: Acesso completo ao sistema e à gestão de usuários.
     Demonstra POLIMORFISMO implementando 'pode_acessar' e 'obter_permissoes'.
     """
-    PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'usuarios'}
+    PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'usuarios', 'financeiro'}
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 1):
         super().__init__(nome, email, perfil_id, "Administrador", senha_hash, ativo, criado_em, id)
@@ -166,11 +166,11 @@ class Vendedor(Usuario):
 
 class Gerente(Usuario):
     """
-    Especialização Gerência: Acesso a todos os módulos operacionais (Dashboard, Estoque/Produtos, Pedidos, Clientes),
+    Especialização Gerência: Acesso a todos os módulos operacionais (Dashboard, Estoque/Produtos, Pedidos, Clientes, Financeiro),
     supervisão de fluxo e aprovação de cancelamentos/devoluções, sem permissão para administrar usuários.
     Demonstra POLIMORFISMO.
     """
-    PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes'}
+    PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'financeiro'}
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 4):
         super().__init__(nome, email, perfil_id, "Gerência", senha_hash, ativo, criado_em, id)
@@ -184,11 +184,11 @@ class Gerente(Usuario):
 
 class Financeiro(Usuario):
     """
-    Especialização Financeiro: Acesso ao Dashboard, confirmação de pagamentos
-    e conciliação de reembolsos vinculados aos pedidos.
+    Especialização Financeiro: Acesso ao Dashboard, confirmação de pagamentos,
+    contas a pagar, contas a receber, fluxo de caixa e relatórios financeiros.
     Demonstra POLIMORFISMO.
     """
-    PERMISSOES = {'dashboard', 'pedidos'}
+    PERMISSOES = {'dashboard', 'pedidos', 'financeiro'}
 
     def __init__(self, nome: str, email: str, senha_hash: str = None, ativo: bool = True, criado_em=None, id: int = None, perfil_id: int = 5):
         super().__init__(nome, email, perfil_id, "Financeiro", senha_hash, ativo, criado_em, id)

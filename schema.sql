@@ -213,16 +213,24 @@ CREATE TABLE IF NOT EXISTS cancelamentos_devolucoes (
 CREATE TABLE IF NOT EXISTS pagamentos_reembolsos (
     id INT AUTO_INCREMENT PRIMARY KEY,
     pedido_id INT NOT NULL,
-    tipo VARCHAR(30) NOT NULL, -- 'Pagamento', 'Reembolso'
+    tipo VARCHAR(30) NOT NULL, -- 'Pagamento', 'Reembolso', 'Estorno'
     valor DECIMAL(10, 2) NOT NULL,
     forma_pagamento VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'Pendente', -- 'Pendente', 'Confirmado', 'Recusado', 'Reembolsado'
+    operacao_id VARCHAR(64) DEFAULT NULL, -- Identificador único da operação para idempotência
     confirmado_por VARCHAR(100) DEFAULT NULL,
     data_confirmacao DATETIME DEFAULT NULL,
     comprovante_ref VARCHAR(100) DEFAULT NULL,
     data_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_pag_pedidos FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE
+    CONSTRAINT fk_pag_pedidos FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_pag_operacao (operacao_id)
 );
+
+-- Migração idempotente para operacao_id em pagamentos_reembolsos
+SET @tablename = "pagamentos_reembolsos";
+SET @columnname = "operacao_id";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE pagamentos_reembolsos ADD COLUMN operacao_id VARCHAR(64) DEFAULT NULL AFTER status;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
 
 
 -- 8. Tabela: perfis (RBAC) com o novo cargo 'Financeiro'
@@ -269,6 +277,53 @@ CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
 );
 
 
+-- 11. Tabela: fornecedores (Módulo Financeiro - Credores e Fornecedores)
+CREATE TABLE IF NOT EXISTS fornecedores (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    razao_social VARCHAR(150) NOT NULL,
+    cnpj_cpf VARCHAR(20) DEFAULT NULL,
+    email VARCHAR(150) DEFAULT NULL,
+    telefone VARCHAR(50) DEFAULT NULL,
+    categoria VARCHAR(100) DEFAULT 'Geral',
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- 12. Tabela: contas_pagar (Módulo Financeiro - Despesas e Títulos a Pagar)
+CREATE TABLE IF NOT EXISTS contas_pagar (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    descricao VARCHAR(200) NOT NULL,
+    fornecedor_id INT DEFAULT NULL,
+    categoria VARCHAR(100) NOT NULL DEFAULT 'Operacional',
+    valor_original DECIMAL(10, 2) NOT NULL,
+    valor_pago DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    data_vencimento DATE NOT NULL,
+    data_pagamento DATETIME DEFAULT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Pendente', -- 'Pendente', 'Parcialmente Pago', 'Pago', 'Cancelado'
+    forma_pagamento VARCHAR(50) DEFAULT NULL,
+    comprovante VARCHAR(100) DEFAULT NULL,
+    responsavel VARCHAR(100) DEFAULT 'Financeiro',
+    observacoes TEXT DEFAULT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_contas_fornecedor FOREIGN KEY (fornecedor_id) REFERENCES fornecedores(id) ON DELETE SET NULL
+);
+
+
+-- 13. Tabela: transacoes_caixa (Módulo Financeiro - Movimentações Efetivas de Caixa / Fluxo de Caixa)
+CREATE TABLE IF NOT EXISTS transacoes_caixa (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    operacao_id VARCHAR(64) NOT NULL UNIQUE, -- Identificador único da operação para impedir duplicidades
+    tipo VARCHAR(20) NOT NULL, -- 'Entrada', 'Saída'
+    origem VARCHAR(50) NOT NULL, -- 'Pedido', 'Conta a Pagar', 'Avulso', 'Estorno'
+    referencia_id INT DEFAULT NULL, -- id do pedido ou da conta a pagar
+    valor DECIMAL(10, 2) NOT NULL,
+    forma_pagamento VARCHAR(50) NOT NULL DEFAULT 'Outros',
+    descricao VARCHAR(255) NOT NULL,
+    responsavel VARCHAR(100) NOT NULL,
+    data_transacao DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+
 -- Dados Iniciais / Testes
 INSERT INTO produtos (id, codigo, nome, categoria, preco, estoque, estoque_reservado, estoque_minimo) VALUES
 (1, 'NOT-001', 'Notebook Gamer', 'Informática', 4500.00, 10, 0, 5),
@@ -281,8 +336,8 @@ ON DUPLICATE KEY UPDATE
     estoque_minimo = COALESCE(estoque_minimo, VALUES(estoque_minimo));
 
 INSERT INTO clientes (id, nome, cpf, email, telefone, cidade, endereco) VALUES
-(1, 'Ana Clara Souza', '123.456.789-01', 'ana.souza@email.com', '(11) 98888-1111', 'São Paulo', 'Av. Paulista, 1000 - Bela Vista'),
-(2, 'Carlos Eduardo Lima', '987.654.321-09', 'carlos.lima@email.com', '(21) 97777-2222', 'Rio de Janeiro', 'Rua das Laranjeiras, 500')
+(1, 'Ana Clara Souza', '123.456.789-09', 'ana.souza@email.com', '(11) 98888-1111', 'São Paulo', 'Av. Paulista, 1000 - Bela Vista'),
+(2, 'Carlos Eduardo Lima', '987.654.321-00', 'carlos.lima@email.com', '(21) 97777-2222', 'Rio de Janeiro', 'Rua das Laranjeiras, 500')
 ON DUPLICATE KEY UPDATE
     cpf = COALESCE(cpf, VALUES(cpf)),
     endereco = COALESCE(endereco, VALUES(endereco));

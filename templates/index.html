@@ -41,6 +41,9 @@
                 <button class="nav-item" id="nav-btn-usuarios" onclick="navegarPara('usuarios')" style="display: none;">
                     🔐 Usuários
                 </button>
+                <button class="nav-item" id="nav-btn-financeiro" onclick="navegarPara('financeiro')" style="display: none;">
+                    💰 Financeiro
+                </button>
             </nav>
 
             <div class="sidebar-footer">
@@ -731,7 +734,363 @@
                     </table>
                 </div>
             </section>
+
+            <!-- 6. MÓDULO FINANCEIRO -->
+            <section id="modulo-financeiro" class="modulo">
+                <header class="modulo-header">
+                    <h2>💰 Gestão Financeira</h2>
+                    <p>Controle de fluxo de caixa, contas a pagar, contas a receber e resultado operacional.</p>
+                </header>
+
+                <!-- Sub-abas do Financeiro -->
+                <div class="tabs-estoque" style="margin-bottom: 20px;">
+                    <button class="tab-btn active" id="tab-btn-fin-visao" onclick="alternarAbaFinanceiro('visao')">📊 Visão Geral</button>
+                    <button class="tab-btn" id="tab-btn-fin-pagar" onclick="alternarAbaFinanceiro('pagar')">📤 Contas a Pagar</button>
+                    <button class="tab-btn" id="tab-btn-fin-receber" onclick="alternarAbaFinanceiro('receber')">📥 Contas a Receber</button>
+                    <button class="tab-btn" id="tab-btn-fin-caixa" onclick="alternarAbaFinanceiro('caixa')">💵 Fluxo de Caixa</button>
+                    <button class="tab-btn" id="tab-btn-fin-fornecedores" onclick="alternarAbaFinanceiro('fornecedores')">🏢 Fornecedores</button>
+                </div>
+
+                <!-- SUB-ABA 1: VISÃO GERAL -->
+                <div id="sub-fin-visao" class="sub-fin-content active">
+                    <div class="dashboard-cards" style="margin-bottom: 25px;">
+                        <div class="card card-destaque" style="border-left: 4px solid #10b981;">
+                            <div class="card-icon">💵</div>
+                            <div class="card-info">
+                                <h3>Saldo Disponível (Caixa)</h3>
+                                <p class="card-valor" id="fin-saldo-caixa">R$ 0,00</p>
+                                <small style="color: #64748b;">Movimentações efetivas realizadas</small>
+                            </div>
+                        </div>
+
+                        <div class="card" style="border-left: 4px solid #3b82f6;">
+                            <div class="card-icon">📈</div>
+                            <div class="card-info">
+                                <h3>Receitas (Vendas)</h3>
+                                <p class="card-valor" id="fin-receitas-totais">R$ 0,00</p>
+                                <small style="color: #64748b;">Faturamento de pedidos ativos</small>
+                            </div>
+                        </div>
+
+                        <div class="card" style="border-left: 4px solid #ef4444;">
+                            <div class="card-icon">📉</div>
+                            <div class="card-info">
+                                <h3>Despesas Incorridas</h3>
+                                <p class="card-valor" id="fin-despesas-totais">R$ 0,00</p>
+                                <small style="color: #64748b;">Total de contas e obrigações</small>
+                            </div>
+                        </div>
+
+                        <div class="card" style="border-left: 4px solid #8b5cf6;">
+                            <div class="card-icon">⚖️</div>
+                            <div class="card-info">
+                                <h3>Resultado Operacional Simplificado</h3>
+                                <p class="card-valor" id="fin-resultado-simplificado">R$ 0,00</p>
+                                <small style="color: #64748b;">Receitas Totais - Despesas Totais</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="card" style="border-left: 4px solid #f59e0b;">
+                            <h4>📥 Contas a Receber (Pendente)</h4>
+                            <p class="card-valor" id="fin-receber-pendente" style="font-size: 1.5rem; margin-top: 10px;">R$ 0,00</p>
+                            <p style="color: #64748b; font-size: 0.9rem;">Valores pendentes de conciliação em pedidos.</p>
+                        </div>
+                        <div class="card" style="border-left: 4px solid #dc2626;">
+                            <h4>📤 Contas a Pagar (Pendente)</h4>
+                            <p class="card-valor" id="fin-pagar-pendente" style="font-size: 1.5rem; margin-top: 10px;">R$ 0,00</p>
+                            <p style="color: #64748b; font-size: 0.9rem;">Obrigações e despesas com fornecedores em aberto.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 2: CONTAS A PAGAR -->
+                <div id="sub-fin-pagar" class="sub-fin-content" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="filtro-cp-status" class="form-control" onchange="carregarContasPagar()" style="width: 180px;">
+                                <option value="Todos">Todos os Status</option>
+                                <option value="Pendente">Pendentes</option>
+                                <option value="Parcialmente Pago">Parcialmente Pagos</option>
+                                <option value="Vencido">Vencidos</option>
+                                <option value="Pago">Pagos</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" onclick="abrirModalNovaContaPagar()">+ Nova Conta a Pagar</button>
+                    </div>
+
+                    <div class="tabela-container">
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Descrição</th>
+                                    <th>Fornecedor</th>
+                                    <th>Categoria</th>
+                                    <th>Valor Original</th>
+                                    <th>Valor Restante</th>
+                                    <th>Vencimento</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-contas-pagar-corpo">
+                                <tr><td colspan="9" style="text-align: center;">Carregando contas a pagar...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 3: CONTAS A RECEBER -->
+                <div id="sub-fin-receber" class="sub-fin-content" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                        <input type="text" id="busca-contas-receber" placeholder="Pesquisar por cliente, pedido ou CPF..." class="form-control" style="width: 320px;" oninput="filtrarContasReceber()">
+                    </div>
+
+                    <div class="tabela-container">
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>Pedido</th>
+                                    <th>Cliente</th>
+                                    <th>Data Pedido</th>
+                                    <th>Forma Pagto</th>
+                                    <th>Valor Total</th>
+                                    <th>Valor Recebido</th>
+                                    <th>Saldo Restante</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-contas-receber-corpo">
+                                <tr><td colspan="9" style="text-align: center;">Carregando contas a receber...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 4: FLUXO DE CAIXA / TRANSAÇÕES -->
+                <div id="sub-fin-caixa" class="sub-fin-content" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="filtro-caixa-tipo" class="form-control" onchange="carregarFluxoCaixa()" style="width: 150px;">
+                                <option value="Todos">Todos os Tipos</option>
+                                <option value="Entrada">Entradas (+)</option>
+                                <option value="Saída">Saídas (-)</option>
+                            </select>
+                            <select id="filtro-caixa-origem" class="form-control" onchange="carregarFluxoCaixa()" style="width: 170px;">
+                                <option value="Todos">Todas as Origens</option>
+                                <option value="Pedido">Pedidos (Vendas)</option>
+                                <option value="Conta a Pagar">Contas a Pagar</option>
+                                <option value="Estorno">Estornos</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="tabela-container">
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>Data / Hora</th>
+                                    <th>Operação ID</th>
+                                    <th>Tipo</th>
+                                    <th>Origem</th>
+                                    <th>Descrição</th>
+                                    <th>Forma Pagto</th>
+                                    <th>Valor</th>
+                                    <th>Saldo Efetivo</th>
+                                    <th>Responsável</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-fluxo-caixa-corpo">
+                                <tr><td colspan="9" style="text-align: center;">Carregando movimentações do caixa...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 5: FORNECEDORES -->
+                <div id="sub-fin-fornecedores" class="sub-fin-content" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <input type="text" id="busca-fornecedores" placeholder="Buscar fornecedor por razão social, CNPJ ou e-mail..." class="form-control" style="width: 320px;" oninput="filtrarFornecedores()">
+                        <button class="btn btn-primary" onclick="abrirModalNovoFornecedor()">+ Novo Fornecedor</button>
+                    </div>
+
+                    <div class="tabela-container">
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Razão Social</th>
+                                    <th>CNPJ / CPF</th>
+                                    <th>E-mail</th>
+                                    <th>Telefone</th>
+                                    <th>Categoria</th>
+                                    <th>Cadastro</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-fornecedores-corpo">
+                                <tr><td colspan="7" style="text-align: center;">Carregando fornecedores...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
         </main>
+    </div>
+
+    <!-- Modais Financeiros -->
+    <!-- Modal Nova Conta a Pagar -->
+    <div id="modal-conta-pagar" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="modal-close" onclick="fecharModalContaPagar()">&times;</span>
+            <h3>Cadastrar Conta a Pagar</h3>
+            <form id="form-conta-pagar" onsubmit="salvarContaPagar(event)" style="margin-top: 15px;">
+                <div class="form-group">
+                    <label>Descrição da Despesa / Título *</label>
+                    <input type="text" id="cp-descricao" class="form-control" required placeholder="Ex: Fornecimento de Peças, Aluguel, Energia">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Fornecedor / Credor</label>
+                        <select id="cp-fornecedor-id" class="form-control">
+                            <option value="">Selecione um fornecedor (opcional)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <input type="text" id="cp-categoria" class="form-control" value="Operacional" placeholder="Operacional, Fornecedor, etc.">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Valor Original (R$) *</label>
+                        <input type="number" step="0.01" min="0.01" id="cp-valor" class="form-control" required placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Data de Vencimento *</label>
+                        <input type="date" id="cp-vencimento" class="form-control" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Observações</label>
+                    <textarea id="cp-observacoes" class="form-control" rows="2" placeholder="Observações e referências do boleto/NF"></textarea>
+                </div>
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Cadastrar Conta</button>
+                    <button type="button" class="btn btn-secondary" onclick="fecharModalContaPagar()">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Baixa / Pagamento de Conta a Pagar -->
+    <div id="modal-pagar-conta" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="modal-close" onclick="fecharModalBaixaConta()">&times;</span>
+            <h3>Registrar Pagamento de Despesa</h3>
+            <p id="baixa-cp-info" style="color: #64748b; margin-top: 5px;"></p>
+            <form id="form-baixa-cp" onsubmit="confirmarPagamentoContaPagar(event)" style="margin-top: 15px;">
+                <input type="hidden" id="baixa-cp-id">
+                <div class="form-group">
+                    <label>Valor a Pagar (R$) *</label>
+                    <input type="number" step="0.01" min="0.01" id="baixa-cp-valor" class="form-control" required>
+                    <small style="color: #64748b;">Suporta pagamento parcial ou quitação total.</small>
+                </div>
+                <div class="form-group">
+                    <label>Forma de Pagamento *</label>
+                    <select id="baixa-cp-forma" class="form-control">
+                        <option value="PIX">PIX</option>
+                        <option value="Transferência Bancária">Transferência Bancária</option>
+                        <option value="Boleto Bancário">Boleto Bancário</option>
+                        <option value="Cartão de Crédito">Cartão de Crédito</option>
+                        <option value="Espécie / Dinheiro">Espécie / Dinheiro</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Comprovante / Código de Autenticação</label>
+                    <input type="text" id="baixa-cp-comprovante" class="form-control" placeholder="Autenticação bancária ou link">
+                </div>
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Efetivar Saída de Caixa</button>
+                    <button type="button" class="btn btn-secondary" onclick="fecharModalBaixaConta()">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Recebimento de Pedido (Contas a Receber) -->
+    <div id="modal-receber-pedido" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="modal-close" onclick="fecharModalRecebimento()">&times;</span>
+            <h3>Confirmar Recebimento de Venda</h3>
+            <p id="receber-ped-info" style="color: #64748b; margin-top: 5px;"></p>
+            <form id="form-receber-ped" onsubmit="confirmarRecebimentoPedido(event)" style="margin-top: 15px;">
+                <input type="hidden" id="receber-ped-id">
+                <div class="form-group">
+                    <label>Valor Recebido (R$) *</label>
+                    <input type="number" step="0.01" min="0.01" id="receber-ped-valor" class="form-control" required>
+                    <small style="color: #64748b;">Suporta recebimento parcial ou quitação total.</small>
+                </div>
+                <div class="form-group">
+                    <label>Forma de Pagamento *</label>
+                    <select id="receber-ped-forma" class="form-control">
+                        <option value="PIX">PIX</option>
+                        <option value="Cartão de Crédito">Cartão de Crédito</option>
+                        <option value="Boleto Bancário">Boleto Bancário</option>
+                        <option value="Transferência Bancária">Transferência Bancária</option>
+                        <option value="Espécie">Espécie</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Código da Transação / Comprovante</label>
+                    <input type="text" id="receber-ped-comprovante" class="form-control" placeholder="Código NSU / Chave PIX">
+                </div>
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Confirmar Entrada no Caixa</button>
+                    <button type="button" class="btn btn-secondary" onclick="fecharModalRecebimento()">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Novo Fornecedor -->
+    <div id="modal-fornecedor" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 550px;">
+            <span class="modal-close" onclick="fecharModalNovoFornecedor()">&times;</span>
+            <h3>Cadastrar Novo Fornecedor</h3>
+            <form id="form-fornecedor" onsubmit="salvarFornecedor(event)" style="margin-top: 15px;">
+                <div class="form-group">
+                    <label>Razão Social / Nome Fantasia *</label>
+                    <input type="text" id="forn-razao" class="form-control" required placeholder="Nome do Fornecedor / Empresa">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>CNPJ ou CPF</label>
+                        <input type="text" id="forn-cnpj" class="form-control" placeholder="00.000.000/0001-00">
+                    </div>
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <input type="text" id="forn-categoria" class="form-control" value="Geral">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>E-mail</label>
+                        <input type="email" id="forn-email" class="form-control" placeholder="contato@fornecedor.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Telefone</label>
+                        <input type="text" id="forn-telefone" class="form-control" placeholder="(00) 00000-0000">
+                    </div>
+                </div>
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary">Salvar Fornecedor</button>
+                    <button type="button" class="btn btn-secondary" onclick="fecharModalNovoFornecedor()">Cancelar</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- Modal de Detalhes do Pedido -->

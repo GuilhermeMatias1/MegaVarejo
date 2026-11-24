@@ -1,5 +1,5 @@
 from repositories.base_repository import BaseRepository
-from models.cliente import Cliente
+from models.cliente import Cliente, Endereco
 from database.connection import DatabaseConnection
 
 class ClienteRepository(BaseRepository):
@@ -20,8 +20,9 @@ class ClienteRepository(BaseRepository):
         cpf_valor = l.get('cpf')
         if not cpf_valor:
             # Gera um CPF válido temporário apenas se for nulo no banco legado
-            cpf_valor = "11144477735"
+            cpf_valor = "12345678909"
 
+        # Constrói a entidade de domínio Cliente via construtor padrão POO
         return Cliente(
             id=l['id'],
             nome=l['nome'],

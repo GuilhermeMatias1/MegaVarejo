@@ -10,6 +10,7 @@ from services.pedido_service import PedidoService
 from services.cliente_service import ClienteService
 from services.dashboard_service import DashboardService
 from services.usuario_service import UsuarioService
+from services.financeiro_service import FinanceiroService
 
 # Importação de retrocompatibilidade do db.py
 from db import get_db_connection
@@ -32,6 +33,7 @@ pedido_service = PedidoService()
 cliente_service = ClienteService()
 dashboard_service = DashboardService()
 usuario_service = UsuarioService()
+financeiro_service = FinanceiroService()
 
 # Dicionário de permissões mantido para compatibilidade com importações em testes
 ROLE_PERMISSIONS = {
@@ -786,6 +788,212 @@ def alternar_status_usuario(usuario_id):
         return jsonify({"erro": str(ve)}), 400
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
+
+
+# --- ROTAS DA API: MÓDULO FINANCEIRO ---
+
+@app.route('/api/financeiro/visao-geral', methods=['GET'])
+@login_required
+@require_permission('financeiro')
+def obter_visao_geral_financeiro():
+    try:
+        dados = financeiro_service.obter_visao_geral()
+        return jsonify(dados)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/fornecedores', methods=['GET'])
+@login_required
+@require_permission('financeiro')
+def listar_fornecedores():
+    busca = request.args.get('busca')
+    try:
+        fornecedores = financeiro_service.listar_fornecedores(busca)
+        return jsonify(fornecedores)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/fornecedores', methods=['POST'])
+@login_required
+@require_permission('financeiro')
+def cadastrar_fornecedor():
+    dados = request.get_json() or {}
+    razao_social = dados.get('razao_social')
+    if not razao_social:
+        return jsonify({"erro": "A razão social ou nome do credor é obrigatória."}), 400
+
+    try:
+        resultado = financeiro_service.cadastrar_fornecedor(
+            razao_social=razao_social,
+            cnpj_cpf=dados.get('cnpj_cpf', ''),
+            email=dados.get('email', ''),
+            telefone=dados.get('telefone', ''),
+            categoria=dados.get('categoria', 'Geral')
+        )
+        return jsonify(resultado), 201
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/contas-pagar', methods=['GET'])
+@login_required
+@require_permission('financeiro')
+def listar_contas_pagar():
+    status = request.args.get('status')
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+    try:
+        contas = financeiro_service.listar_contas_pagar(status, data_inicio, data_fim)
+        return jsonify(contas)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/contas-pagar', methods=['POST'])
+@login_required
+@require_permission('financeiro')
+def cadastrar_conta_pagar():
+    dados = request.get_json() or {}
+    descricao = dados.get('descricao')
+    valor = dados.get('valor')
+    data_vencimento = dados.get('data_vencimento')
+
+    if not descricao or not valor or not data_vencimento:
+        return jsonify({"erro": "Descrição, valor e data de vencimento são obrigatórios."}), 400
+
+    try:
+        resultado = financeiro_service.cadastrar_conta_pagar(
+            descricao=descricao,
+            valor=float(valor),
+            data_vencimento=data_vencimento,
+            fornecedor_id=dados.get('fornecedor_id'),
+            categoria=dados.get('categoria', 'Operacional'),
+            observacoes=dados.get('observacoes', '')
+        )
+        return jsonify(resultado), 201
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/contas-pagar/<int:conta_id>/pagar', methods=['POST'])
+@login_required
+@require_permission('financeiro')
+def pagar_conta_pagar(conta_id):
+    dados = request.get_json() or {}
+    valor = dados.get('valor')
+    forma_pagamento = dados.get('forma_pagamento', 'PIX')
+    comprovante = dados.get('comprovante')
+    operacao_id = dados.get('operacao_id')
+    responsavel = session.get('usuario_nome') or 'Operador Financeiro'
+
+    if not valor:
+        return jsonify({"erro": "O valor do pagamento é obrigatório."}), 400
+
+    try:
+        resultado = financeiro_service.pagar_conta(
+            conta_id=conta_id,
+            valor=float(valor),
+            forma_pagamento=forma_pagamento,
+            responsavel=responsavel,
+            operacao_id=operacao_id,
+            comprovante=comprovante
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/contas-receber', methods=['GET'])
+@login_required
+@require_permission('financeiro')
+def listar_contas_receber():
+    busca = request.args.get('busca')
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+    try:
+        contas = financeiro_service.listar_contas_receber(busca, data_inicio, data_fim)
+        return jsonify(contas)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/contas-receber/<int:pedido_id>/receber', methods=['POST'])
+@login_required
+@require_permission('financeiro')
+def receber_pagamento_pedido(pedido_id):
+    dados = request.get_json() or {}
+    valor = dados.get('valor')
+    forma_pagamento = dados.get('forma_pagamento', 'PIX')
+    comprovante = dados.get('comprovante')
+    operacao_id = dados.get('operacao_id')
+    responsavel = session.get('usuario_nome') or 'Operador Financeiro'
+
+    if not valor:
+        return jsonify({"erro": "O valor de recebimento é obrigatório."}), 400
+
+    try:
+        resultado = financeiro_service.receber_pagamento_pedido(
+            pedido_id=pedido_id,
+            valor=float(valor),
+            forma_pagamento=forma_pagamento,
+            responsavel=responsavel,
+            operacao_id=operacao_id,
+            comprovante=comprovante
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/pedidos/<int:pedido_id>/estornar', methods=['POST'])
+@login_required
+@require_permission('financeiro')
+def estornar_pagamento_pedido(pedido_id):
+    dados = request.get_json() or {}
+    valor = dados.get('valor')
+    motivo = dados.get('motivo')
+    operacao_id = dados.get('operacao_id')
+    responsavel = session.get('usuario_nome') or 'Operador Financeiro'
+
+    if not valor or not motivo:
+        return jsonify({"erro": "Valor e motivo do estorno são obrigatórios."}), 400
+
+    try:
+        resultado = financeiro_service.estornar_pagamento_pedido(
+            pedido_id=pedido_id,
+            valor=float(valor),
+            motivo=motivo,
+            responsavel=responsavel,
+            operacao_id=operacao_id
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/financeiro/fluxo-caixa', methods=['GET'])
+@login_required
+@require_permission('financeiro')
+def listar_fluxo_caixa():
+    tipo = request.args.get('tipo')
+    origem = request.args.get('origem')
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+    try:
+        transacoes = financeiro_service.listar_fluxo_caixa(tipo, origem, data_inicio, data_fim)
+        return jsonify(transacoes)
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
