@@ -24,7 +24,7 @@ def get_db_connection():
         port = int(os.getenv('MYSQLPORT', 3306))
         user = os.getenv('MYSQLUSER', 'root')
         password = os.getenv('MYSQLPASSWORD', '')
-        database = os.getenv('MYSQLDATABASE', 'megavarejo_erp')
+        database = os.getenv('MYSQL_DATABASE', 'megavarejo_erp')
 
     ssl_config = None
     use_ssl = os.getenv('MYSQL_SSL', 'false').lower() in ('true', '1', 't', 'yes')
