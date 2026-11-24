@@ -20,10 +20,10 @@ def get_db_connection():
         password = parsed.password or ''
         database = parsed.path.lstrip('/') or 'megavarejo_erp'
     else:
-        host = os.getenv('MYSQL_HOST', 'localhost')
-        port = int(os.getenv('MYSQL_PORT', 3306))
-        user = os.getenv('MYSQL_USER', 'root')
-        password = os.getenv('MYSQL_PASSWORD', '')
+        host = os.getenv('MYSQLHOST', 'localhost')
+        port = int(os.getenv('MYSQLPORT', 3306))
+        user = os.getenv('MYSQLUSER', 'root')
+        password = os.getenv('MYSQLPASSWORD', '')
         database = os.getenv('MYSQL_DATABASE', 'megavarejo_erp')
 
     ssl_config = None
