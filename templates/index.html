@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ERP - MegaVarejo S.A.</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- Menu Lateral -->
+        <aside class="sidebar">
+            <div class="brand">
+                <h2>MegaVarejo S.A.</h2>
+                <small>ERP & Gestão de Estoque</small>
+            </div>
+
+            <!-- Dados do Usuário Autenticado -->
+            <div class="user-session-card">
+                <div class="user-avatar" id="sidebar-avatar">U</div>
+                <div class="user-details">
+                    <strong id="sidebar-user-name">Carregando...</strong>
+                    <span id="sidebar-user-role" class="user-badge">Perfil</span>
+                </div>
+            </div>
+
+            <!-- Menu com visualização filtrada por RBAC -->
+            <nav class="nav-menu">
+                <button class="nav-item active" id="nav-btn-dashboard" onclick="navegarPara('dashboard')" style="display: none;">
+                    📊 Dashboard
+                </button>
+                <button class="nav-item" id="nav-btn-produtos" onclick="navegarPara('produtos')" style="display: none;">
+                    📦 Estoque
+                </button>
+                <button class="nav-item" id="nav-btn-pedidos" onclick="navegarPara('pedidos')" style="display: none;">
+                    🛒 Pedidos
+                </button>
+                <button class="nav-item" id="nav-btn-clientes" onclick="navegarPara('clientes')" style="display: none;">
+                    👥 Clientes
+                </button>
+                <button class="nav-item" id="nav-btn-usuarios" onclick="navegarPara('usuarios')" style="display: none;">
+                    🔐 Usuários
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="btn-logout" onclick="fazerLogout()">
+                    🚪 Sair (Logout)
+                </button>
+            </div>
+        </aside>
+
+        <!-- Conteúdo Principal -->
+        <main class="content">
+            <!-- Feedback / Mensagens de Notificação -->
+            <div id="alerta" class="alerta" style="display: none;"></div>
+
+            <!-- 1. MÓDULO DASHBOARD GERAL -->
+            <section id="modulo-dashboard" class="modulo">
+                <header class="section-header">
+                    <h1>Dashboard Corporativo</h1>
+                    <p>Visão geral dos indicadores de desempenho da MegaVarejo.</p>
+                </header>
+
+                <div class="cards-grid">
+                    <div class="card">
+                        <div class="card-title">Quantidade de Produtos</div>
+                        <div class="card-value" id="dash-produtos">0</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Quantidade de Pedidos</div>
+                        <div class="card-value" id="dash-pedidos">0</div>
+                    </div>
+                    <div class="card highlight">
+                        <div class="card-title">Total de Vendas</div>
+                        <div class="card-value" id="dash-vendas">R$ 0,00</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. MÓDULO ESTOQUE (REFORMULADO) -->
+            <section id="modulo-produtos" class="modulo">
+                <header class="section-header">
+                    <h1>Módulo de Estoque</h1>
+                    <p>Controle completo de produtos, saldo físico, entradas, saídas, ajustes e auditoria.</p>
+                </header>
+
+                <!-- Sub-painel: Dashboard de Estoque -->
+                <div class="cards-grid" style="margin-bottom: 24px;">
+                    <div class="card">
+                        <div class="card-title">Produtos Cadastrados</div>
+                        <div class="card-value" id="kpi-estoque-produtos">0</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Unidades em Estoque</div>
+                        <div class="card-value" id="kpi-estoque-unidades">0</div>
+                    </div>
+                    <div class="card" id="card-kpi-criticos" style="border-left-color: #ef4444;">
+                        <div class="card-title">Estoque Baixo / Zerado</div>
+                        <div class="card-value" id="kpi-estoque-criticos" style="color: #dc2626;">0</div>
+                    </div>
+                </div>
+
+                <!-- Sub-navegação interna do Estoque -->
+                <div class="estoque-tabs">
+                    <button class="tab-btn active" onclick="alternarAbaEstoque('consulta')">📋 Consulta de Estoque</button>
+                    <button class="tab-btn" onclick="alternarAbaEstoque('movimentacoes')">🔄 Entradas e Saídas</button>
+                    <button class="tab-btn" onclick="alternarAbaEstoque('ajustes')">⚖️ Ajustes de Inventário</button>
+                    <button class="tab-btn" onclick="alternarAbaEstoque('historico')">📜 Histórico de Movimentações</button>
+                    <button class="tab-btn" onclick="alternarAbaEstoque('relatorios')">📈 Relatórios</button>
+                </div>
+
+                <!-- SUB-ABA 1: CONSULTA DE ESTOQUE E CADASTRO/EDIÇÃO -->
+                <div id="sub-estoque-consulta" class="sub-estoque-content active">
+                    <!-- Formulário de Cadastro/Edição de Produto -->
+                    <div class="painel-form" id="painel-form-produto">
+                        <h3 id="form-produto-titulo">Cadastrar Novo Produto</h3>
+                        <form id="form-produto" onsubmit="salvarProduto(event)">
+                            <input type="hidden" id="prod-id">
+                            <div class="form-row">
+                                <div class="form-group flex-1">
+                                    <label for="prod-codigo">Código / SKU</label>
+                                    <input type="text" id="prod-codigo" placeholder="Ex: PRD-001">
+                                </div>
+                                <div class="form-group flex-2">
+                                    <label for="prod-nome">Nome do Produto *</label>
+                                    <input type="text" id="prod-nome" required placeholder="Ex: Monitor 24 Polegadas">
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="prod-categoria">Categoria</label>
+                                    <input type="text" id="prod-categoria" placeholder="Ex: Informática, Periféricos">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group flex-1" id="grupo-prod-preco">
+                                    <label for="prod-preco">Preço Unitário (R$) *</label>
+                                    <input type="number" step="0.01" min="0" id="prod-preco" required placeholder="0.00">
+                                </div>
+                                <div class="form-group flex-1" id="grupo-prod-estoque">
+                                    <label for="prod-estoque">Estoque Inicial</label>
+                                    <input type="number" step="1" min="0" id="prod-estoque" required placeholder="0">
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="prod-estoque-minimo">Estoque Mínimo</label>
+                                    <input type="number" step="1" min="0" id="prod-estoque-minimo" value="5" placeholder="5">
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary" id="btn-salvar-produto">Salvar Produto</button>
+                                <button type="button" class="btn btn-secondary" id="btn-cancelar-edicao" onclick="cancelarEdicaoProduto()" style="display: none;">Cancelar</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Tabela de Consulta de Produtos com Filtro de Pesquisa -->
+                    <div class="tabela-container">
+                        <div class="tabela-header-actions">
+                            <h3>Produtos em Estoque</h3>
+                            <div class="busca-box">
+                                <input type="text" id="campo-busca-produto" placeholder="Pesquisar por nome, código ou categoria..." oninput="filtrarProdutos()">
+                            </div>
+                        </div>
+
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>Código</th>
+                                    <th>Nome</th>
+                                    <th>Categoria</th>
+                                    <th>Preço</th>
+                                    <th>Estoque Disponível</th>
+                                    <th>Estoque Mín.</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-produtos-corpo">
+                                <tr><td colspan="8" style="text-align:center;">Carregando produtos...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 2: ENTRADAS E SAÍDAS -->
+                <div id="sub-estoque-movimentacoes" class="sub-estoque-content">
+                    <div class="painel-form">
+                        <h3>Registrar Entrada ou Saída de Estoque</h3>
+                        <p style="margin-bottom: 16px; color: #64748b; font-size: 0.9rem;">
+                            Dê entrada de novas mercadorias ou registre saídas manuais (perdas, consumo interno ou remessas).
+                        </p>
+                        <form onsubmit="executarMovimentacao(event)">
+                            <div class="form-row">
+                                <div class="form-group flex-2">
+                                    <label for="mov-produto-id">Selecione o Produto *</label>
+                                    <select id="mov-produto-id" required onchange="atualizarInfoProdutoMovimentacao()">
+                                        <option value="">-- Selecione o produto --</option>
+                                    </select>
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="mov-tipo">Tipo de Movimentação *</label>
+                                    <select id="mov-tipo" required>
+                                        <option value="Entrada">📥 Entrada (+)</option>
+                                        <option value="Saída">📤 Saída (-)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="mov-quantidade">Quantidade *</label>
+                                    <input type="number" id="mov-quantidade" min="1" value="1" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group flex-2">
+                                    <label for="mov-motivo">Motivo / Observação *</label>
+                                    <input type="text" id="mov-motivo" required placeholder="Ex: Compra de fornecedor NF 1234, Devolução, etc.">
+                                </div>
+                                <div class="form-group flex-1" style="justify-content: flex-end;">
+                                    <span id="mov-info-saldo" style="font-size: 0.9rem; font-weight: 600; color: #475569; padding-bottom: 10px;">
+                                        Saldo Atual: -
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Confirmar Movimentação</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 3: AJUSTES DE INVENTÁRIO -->
+                <div id="sub-estoque-ajustes" class="sub-estoque-content">
+                    <div class="painel-form">
+                        <h3>Ajuste Físico de Inventário</h3>
+                        <p style="margin-bottom: 16px; color: #64748b; font-size: 0.9rem;">
+                            Corrige o saldo físico após contagem e conferência, registrando a divergência para auditoria.
+                        </p>
+                        <form onsubmit="executarAjuste(event)">
+                            <div class="form-row">
+                                <div class="form-group flex-2">
+                                    <label for="ajuste-produto-id">Selecione o Produto *</label>
+                                    <select id="ajuste-produto-id" required onchange="atualizarInfoProdutoAjuste()">
+                                        <option value="">-- Selecione o produto --</option>
+                                    </select>
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="ajuste-novo-saldo">Novo Saldo Físico *</label>
+                                    <input type="number" id="ajuste-novo-saldo" min="0" required placeholder="0">
+                                </div>
+                                <div class="form-group flex-1" style="justify-content: flex-end;">
+                                    <span id="ajuste-info-saldo" style="font-size: 0.9rem; font-weight: 600; color: #475569; padding-bottom: 10px;">
+                                        Saldo Atual no Sistema: -
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group flex-2">
+                                    <label for="ajuste-justificativa">Justificativa do Ajuste *</label>
+                                    <input type="text" id="ajuste-justificativa" required placeholder="Ex: Inventário geral de fechamento, produto avariado, etc.">
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Registrar Ajuste de Estoque</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 4: HISTÓRICO DE MOVIMENTAÇÕES -->
+                <div id="sub-estoque-historico" class="sub-estoque-content">
+                    <div class="tabela-container">
+                        <div class="tabela-header-actions">
+                            <h3>Histórico Geral de Movimentações</h3>
+                            <button class="btn btn-secondary btn-sm" onclick="carregarHistoricoMovimentacoes()">🔄 Atualizar</button>
+                        </div>
+                        <table class="tabela">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Data / Hora</th>
+                                    <th>Produto</th>
+                                    <th>Tipo</th>
+                                    <th>Qtd</th>
+                                    <th>Saldo Ant.</th>
+                                    <th>Novo Saldo</th>
+                                    <th>Motivo / Justificativa</th>
+                                    <th>Responsável</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tabela-historico-corpo">
+                                <tr><td colspan="9" style="text-align: center;">Carregando histórico...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SUB-ABA 5: RELATÓRIOS DE ESTOQUE -->
+                <div id="sub-estoque-relatorios" class="sub-estoque-content">
+                    <div class="relatorios-grid">
+                        <!-- Relatório 1: Estoque Baixo ou Zerado -->
+                        <div class="tabela-container">
+                            <h3 style="color: #dc2626;">🚨 Produtos com Estoque Baixo ou Zerado</h3>
+                            <table class="tabela compact">
+                                <thead>
+                                    <tr>
+                                        <th>Código</th>
+                                        <th>Produto</th>
+                                        <th>Estoque Atual</th>
+                                        <th>Estoque Mín.</th>
+                                        <th>Situação</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-rel-criticos">
+                                    <tr><td colspan="5" style="text-align: center;">Carregando...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Relatório 2: Produtos com Maior Movimentação -->
+                        <div class="tabela-container" style="margin-top: 24px;">
+                            <h3>📊 Produtos com Maior Movimentação</h3>
+                            <table class="tabela compact">
+                                <thead>
+                                    <tr>
+                                        <th>Código</th>
+                                        <th>Produto</th>
+                                        <th>Total de Movimentações</th>
+                                        <th>Volume Total de Peças</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-rel-mais-movimentados">
+                                    <tr><td colspan="4" style="text-align: center;">Carregando...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. MÓDULO PEDIDOS -->
+            <section id="modulo-pedidos" class="modulo">
+                <header class="section-header">
+                    <h1>Módulo de Pedidos</h1>
+                    <p>Crie novos pedidos com baixa automática de estoque e altere o status.</p>
+                </header>
+
+                <!-- Criar Pedido -->
+                <div class="painel-form">
+                    <h3>Novo Pedido</h3>
+                    <div class="pedido-builder">
+                        <div class="form-row">
+                            <div class="form-group flex-2">
+                                <label for="pedido-produto-select">Selecione o Produto</label>
+                                <select id="pedido-produto-select">
+                                    <option value="">Carregando produtos disponíveis...</option>
+                                </select>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="pedido-quantidade">Quantidade</label>
+                                <input type="number" id="pedido-quantidade" min="1" value="1">
+                            </div>
+                            <div class="form-group flex-auto" style="align-self: flex-end;">
+                                <button type="button" class="btn btn-secondary" onclick="adicionarItemAoPedido()">+ Adicionar Item</button>
+                            </div>
+                        </div>
+
+                        <!-- Itens Selecionados no Pedido Atual -->
+                        <div class="itens-pedido-carrinho">
+                            <h4>Itens Selecionados</h4>
+                            <table class="tabela compact">
+                                <thead>
+                                    <tr>
+                                        <th>Produto</th>
+                                        <th>Preço Unit.</th>
+                                        <th>Qtd</th>
+                                        <th>Subtotal</th>
+                                        <th>Remover</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tabela-itens-pedido-corpo">
+                                    <tr><td colspan="5" style="text-align: center; color: #777;">Nenhum item adicionado ainda.</td></tr>
+                                </tbody>
+                            </table>
+                            <div class="pedido-resumo">
+                                <span>Total do Pedido: <strong id="pedido-valor-total">R$ 0,00</strong></span>
+                                <button type="button" class="btn btn-primary" onclick="finalizarPedido()">Finalizar e Descontar Estoque</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista de Pedidos Realizados -->
+                <div class="tabela-container">
+                    <h3>Histórico de Pedidos</h3>
+                    <table class="tabela">
+                        <thead>
+                            <tr>
+                                <th>Nº Pedido</th>
+                                <th>Data/Hora</th>
+                                <th>Valor Total</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-pedidos-corpo">
+                            <tr><td colspan="5" style="text-align:center;">Carregando pedidos...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 4. MÓDULO CLIENTES -->
+            <section id="modulo-clientes" class="modulo">
+                <header class="section-header">
+                    <h1>Módulo de Clientes</h1>
+                    <p>Cadastro e gerenciamento de clientes para vendas.</p>
+                </header>
+
+                <!-- Formulário de Cliente -->
+                <div class="painel-form">
+                    <h3>Cadastrar Novo Cliente</h3>
+                    <form id="form-cliente" onsubmit="salvarCliente(event)">
+                        <div class="form-row">
+                            <div class="form-group flex-2">
+                                <label for="cli-nome">Nome Completo</label>
+                                <input type="text" id="cli-nome" required placeholder="Ex: Maria Fernandes">
+                            </div>
+                            <div class="form-group flex-2">
+                                <label for="cli-email">E-mail</label>
+                                <input type="email" id="cli-email" required placeholder="maria@email.com">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group flex-1">
+                                <label for="cli-telefone">Telefone / WhatsApp</label>
+                                <input type="text" id="cli-telefone" placeholder="(11) 99999-9999">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="cli-cidade">Cidade / UF</label>
+                                <input type="text" id="cli-cidade" placeholder="São Paulo / SP">
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Cadastrar Cliente</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Lista de Clientes -->
+                <div class="tabela-container">
+                    <h3>Clientes Cadastrados</h3>
+                    <table class="tabela">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nome</th>
+                                <th>E-mail</th>
+                                <th>Telefone</th>
+                                <th>Cidade</th>
+                                <th>Data Cadastro</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-clientes-corpo">
+                            <tr><td colspan="6" style="text-align:center;">Carregando clientes...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 5. MÓDULO ADMINISTRAÇÃO DE USUÁRIOS (SOMENTE ADMINISTRADOR) -->
+            <section id="modulo-usuarios" class="modulo">
+                <header class="section-header">
+                    <h1>Administração de Usuários (RBAC)</h1>
+                    <p>Cadastre novos colaboradores, defina perfis de acesso e gerencie ativações.</p>
+                </header>
+
+                <!-- Formulário de Usuário (Cadastro / Edição) -->
+                <div class="painel-form">
+                    <h3 id="form-usuario-titulo">Cadastrar Novo Usuário</h3>
+                    <form id="form-usuario" onsubmit="salvarUsuario(event)">
+                        <input type="hidden" id="user-id">
+                        <div class="form-row">
+                            <div class="form-group flex-2">
+                                <label for="user-nome">Nome do Usuário</label>
+                                <input type="text" id="user-nome" required placeholder="Nome completo">
+                            </div>
+                            <div class="form-group flex-2">
+                                <label for="user-email">E-mail de Login</label>
+                                <input type="email" id="user-email" required placeholder="usuario@megavarejo.com">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group flex-1">
+                                <label for="user-perfil">Perfil de Acesso</label>
+                                <select id="user-perfil" required>
+                                    <option value="">Carregando perfis...</option>
+                                </select>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="user-senha" id="lbl-user-senha">Senha de Acesso</label>
+                                <input type="password" id="user-senha" placeholder="Mínimo 6 caracteres">
+                                <small id="dica-senha" style="color: #64748b; font-size: 0.75rem; display: none;">Deixe em branco para manter a senha atual</small>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary" id="btn-salvar-usuario">Salvar Usuário</button>
+                            <button type="button" class="btn btn-secondary" id="btn-cancelar-edicao-user" onclick="cancelarEdicaoUsuario()" style="display: none;">Cancelar</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Lista de Usuários Cadastrados -->
+                <div class="tabela-container">
+                    <h3>Usuários do Sistema</h3>
+                    <table class="tabela">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nome</th>
+                                <th>E-mail</th>
+                                <th>Perfil</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-usuarios-corpo">
+                            <tr><td colspan="6" style="text-align:center;">Carregando usuários...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal de Detalhes do Pedido -->
+    <div id="modal-detalhes" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="modal-close" onclick="fecharModal()">&times;</span>
+            <h3 id="modal-titulo">Detalhes do Pedido</h3>
+            <div id="modal-corpo"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

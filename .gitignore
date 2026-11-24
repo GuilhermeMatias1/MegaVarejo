@@ -1,0 +1,30 @@
+# Ambientes Virtuais e Interpretador
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arquivos de Variáveis de Ambiente e Segredos (NÃO commitar)
+.env
+.env.local
+.env.*.local
+*.secret
+*.pem
+*.key
+
+# Logs e arquivos temporários
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs e Editores
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db

@@ -1,0 +1,691 @@
+import os
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+import pymysql
+
+# Middlewares e Services
+from controllers.auth_middleware import login_required, require_permission
+from models.usuario import UsuarioFactory
+from services.produto_service import ProdutoService
+from services.pedido_service import PedidoService
+from services.cliente_service import ClienteService
+from services.dashboard_service import DashboardService
+from services.usuario_service import UsuarioService
+
+# Importação de retrocompatibilidade do db.py
+from db import get_db_connection
+from models.pedido import formatar_data_br
+
+app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY', 'megavarejo_secret_key_rbac_2026')
+
+# Configuração de cookies de sessão seguros
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax'
+)
+
+# Instanciação dos Serviços da Arquitetura POO
+from services.estoque_service import EstoqueService
+estoque_service = EstoqueService()
+produto_service = estoque_service # Reutilização para retrocompatibilidade
+pedido_service = PedidoService()
+cliente_service = ClienteService()
+dashboard_service = DashboardService()
+usuario_service = UsuarioService()
+
+# Dicionário de permissões mantido para compatibilidade com importações em testes
+ROLE_PERMISSIONS = {
+    'Administrador': {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'usuarios', 'financeiro'},
+    'Estoque': {'dashboard', 'produtos', 'estoque'},
+    'Vendas': {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes'},
+    'Gerência': {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes', 'financeiro'},
+    'Financeiro': {'dashboard', 'pedidos', 'financeiro'}
+}
+
+
+# --- ROTAS DE INTERFACE (PÁGINAS) ---
+
+@app.route('/')
+def index():
+    if 'usuario_id' not in session:
+        return redirect(url_for('login_page'))
+    return render_template('index.html')
+
+@app.route('/login')
+def login_page():
+    if 'usuario_id' in session:
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+
+# --- AUTENTICAÇÃO E SESSÃO ---
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    dados = request.get_json() or {}
+    email = dados.get('email', '')
+    senha = dados.get('senha', '')
+
+    try:
+        usuario = usuario_service.autenticar(email, senha)
+
+        session.clear()
+        session['usuario_id'] = usuario.id
+        session['usuario_nome'] = usuario.nome
+        session['usuario_email'] = usuario.email
+        session['usuario_perfil'] = usuario.perfil_nome
+
+        # Obtenção polimórfica das permissões através do objeto de domínio
+        permissoes = usuario.obter_permissoes()
+
+        return jsonify({
+            'mensagem': 'Login efetuado com sucesso!',
+            'usuario': {
+                'id': usuario.id,
+                'nome': usuario.nome,
+                'email': usuario.email,
+                'perfil': usuario.perfil_nome,
+                'permissoes': permissoes
+            }
+        })
+    except ValueError as ve:
+        return jsonify({'erro': str(ve)}), 400
+    except PermissionError as pe:
+        status_code = 403 if "desativado" in str(pe).lower() else 401
+        return jsonify({'erro': str(pe)}), status_code
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    session.clear()
+    return jsonify({'mensagem': 'Logout realizado com sucesso!'})
+
+@app.route('/api/auth/me', methods=['GET'])
+def api_me():
+    if 'usuario_id' not in session:
+        return jsonify({'autenticado': False}), 401
+
+    perfil = session.get('usuario_perfil')
+    nome_sessao = session.get('usuario_nome') or 'Usuário'
+    email_sessao = session.get('usuario_email') or 'usuario@megavarejo.com'
+    # Objeto especializado polimórfico gerado pela factory
+    usuario_obj = UsuarioFactory.criar_usuario(
+        perfil_nome=perfil,
+        nome=nome_sessao,
+        email=email_sessao,
+        id=session.get('usuario_id')
+    )
+
+    return jsonify({
+        'autenticado': True,
+        'usuario': {
+            'id': usuario_obj.id,
+            'nome': usuario_obj.nome,
+            'email': usuario_obj.email,
+            'perfil': usuario_obj.perfil_nome,
+            'permissoes': usuario_obj.obter_permissoes()
+        }
+    })
+
+
+# --- 1. MÓDULO DASHBOARD (API) ---
+
+@app.route('/api/dashboard', methods=['GET'])
+@login_required
+@require_permission('dashboard')
+def get_dashboard():
+    try:
+        metricas = dashboard_service.obter_metricas()
+        return jsonify(metricas)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+
+# --- 2. MÓDULO ESTOQUE (PRODUTOS, MOVIMENTAÇÕES, AJUSTES E RELATÓRIOS) ---
+
+@app.route('/api/produtos', methods=['GET'])
+@login_required
+@require_permission('produtos')
+def listar_produtos():
+    busca = request.args.get('busca')
+    try:
+        produtos = estoque_service.listar_produtos(busca=busca)
+        return jsonify(produtos)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/produtos', methods=['POST'])
+@login_required
+@require_permission('produtos')
+def cadastrar_produto():
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    preco = dados.get('preco')
+    estoque = dados.get('estoque')
+
+    if nome is None or str(nome).strip() == '':
+        return jsonify({"erro": "O nome do produto é obrigatório."}), 400
+
+    # Perfil Estoquista não define preço; para outros perfis, valida se enviado
+    usuario_perfil = session.get('usuario_perfil')
+    if usuario_perfil != 'Estoque' and preco is None:
+        return jsonify({"erro": "O preço do produto é obrigatório."}), 400
+
+    try:
+        resultado = estoque_service.cadastrar_produto(
+            dados,
+            responsavel=session.get('usuario_nome', 'Sistema'),
+            usuario_perfil=usuario_perfil
+        )
+        return jsonify(resultado), 201
+    except PermissionError as pe:
+        return jsonify({"erro": str(pe)}), 403
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/produtos/<int:produto_id>', methods=['PUT'])
+@login_required
+@require_permission('produtos')
+def editar_produto(produto_id):
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    if nome is not None and str(nome).strip() == '':
+        return jsonify({"erro": "O nome do produto não pode ser vazio."}), 400
+
+    usuario_perfil = session.get('usuario_perfil')
+    try:
+        resultado = estoque_service.atualizar_produto(produto_id, dados, usuario_perfil=usuario_perfil)
+        return jsonify(resultado)
+    except PermissionError as pe:
+        return jsonify({"erro": str(pe)}), 403
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/produtos/<int:produto_id>', methods=['DELETE'])
+@login_required
+@require_permission('produtos')
+def excluir_produto(produto_id):
+    usuario_perfil = session.get('usuario_perfil')
+    try:
+        resultado = estoque_service.excluir_produto(produto_id, usuario_perfil=usuario_perfil)
+        return jsonify(resultado)
+    except PermissionError as pe:
+        return jsonify({"erro": str(pe)}), 403
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except pymysql.err.IntegrityError:
+        return jsonify({"erro": "Não é possível excluir produto vinculado a pedidos existentes."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+# --- NOVAS ROTAS ESPECÍFICAS DE GESTÃO DE ESTOQUE ---
+
+@app.route('/api/estoque/resumo', methods=['GET'])
+@login_required
+@require_permission('produtos')
+def obter_resumo_estoque():
+    try:
+        resumo = estoque_service.obter_resumo_estoque()
+        return jsonify(resumo)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/estoque/movimentacoes', methods=['GET'])
+@login_required
+@require_permission('produtos')
+def listar_historico_movimentacoes():
+    produto_id = request.args.get('produto_id')
+    tipo = request.args.get('tipo')
+    limite = int(request.args.get('limite', 100))
+    try:
+        historico = estoque_service.listar_historico(limite=limite, produto_id=produto_id, tipo=tipo)
+        return jsonify(historico)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/estoque/movimentacoes', methods=['POST'])
+@login_required
+@require_permission('produtos')
+def registrar_movimentacao_estoque():
+    dados = request.get_json() or {}
+    produto_id = dados.get('produto_id')
+    tipo = dados.get('tipo')
+    quantidade = dados.get('quantidade')
+    motivo = dados.get('motivo')
+
+    if not produto_id or not tipo or quantidade is None or not motivo:
+        return jsonify({"erro": "Campos 'produto_id', 'tipo', 'quantidade' e 'motivo' são obrigatórios."}), 400
+
+    try:
+        resultado = estoque_service.registrar_movimentacao(
+            produto_id=produto_id,
+            tipo=tipo,
+            quantidade=quantidade,
+            motivo=motivo,
+            responsavel=session.get('usuario_nome', 'Operador de Estoque')
+        )
+        return jsonify(resultado), 201
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/estoque/ajustes', methods=['POST'])
+@login_required
+@require_permission('produtos')
+def registrar_ajuste_estoque():
+    dados = request.get_json() or {}
+    produto_id = dados.get('produto_id')
+    novo_saldo = dados.get('novo_saldo')
+    justificativa = dados.get('justificativa')
+
+    if not produto_id or novo_saldo is None or not justificativa:
+        return jsonify({"erro": "Campos 'produto_id', 'novo_saldo' e 'justificativa' são obrigatórios."}), 400
+
+    try:
+        resultado = estoque_service.registrar_ajuste(
+            produto_id=produto_id,
+            novo_saldo=novo_saldo,
+            justificativa=justificativa,
+            responsavel=session.get('usuario_nome', 'Conferente de Estoque')
+        )
+        return jsonify(resultado), 201
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/estoque/relatorios/criticos', methods=['GET'])
+@login_required
+@require_permission('produtos')
+def relatorio_estoque_critico():
+    try:
+        criticos = estoque_service.obter_relatorio_estoque_baixo()
+        return jsonify(criticos)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/estoque/relatorios/mais-movimentados', methods=['GET'])
+@login_required
+@require_permission('produtos')
+def relatorio_mais_movimentados():
+    limite = int(request.args.get('limite', 5))
+    try:
+        rel = estoque_service.obter_relatorio_mais_movimentados(limite=limite)
+        return jsonify(rel)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+
+# --- 3. MÓDULO PEDIDOS ---
+
+@app.route('/api/pedidos', methods=['GET'])
+@login_required
+@require_permission('pedidos')
+def listar_pedidos():
+    busca = request.args.get('busca')
+    status_pedido = request.args.get('status_pedido')
+    status_pagamento = request.args.get('status_pagamento')
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+    apenas_atrasados = request.args.get('apenas_atrasados', 'false').lower() == 'true'
+
+    try:
+        pedidos = pedido_service.listar_pedidos(
+            busca=busca,
+            status_pedido=status_pedido,
+            status_pagamento=status_pagamento,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            apenas_atrasados=apenas_atrasados
+        )
+        return jsonify(pedidos)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/pedidos/indicadores', methods=['GET'])
+@login_required
+@require_permission('pedidos')
+def obter_indicadores_pedidos():
+    try:
+        indicadores = pedido_service.obter_indicadores_operacionais()
+        return jsonify(indicadores)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>', methods=['GET'])
+@login_required
+@require_permission('pedidos')
+def obter_pedido(pedido_id):
+    try:
+        pedido = pedido_service.obter_pedido(pedido_id)
+        if not pedido:
+            return jsonify({"erro": "Pedido não encontrado."}), 404
+        return jsonify(pedido)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/pedidos', methods=['POST'])
+@login_required
+@require_permission('pedidos')
+def criar_pedido():
+    # Perfil Estoque não cria pedidos, apenas Vendedor/Gerente/Admin
+    perfil = session.get('usuario_perfil')
+    if perfil == 'Estoque':
+        return jsonify({"erro": "Perfil 'Estoque' não possui permissão para criar pedidos."}), 403
+
+    dados = request.get_json() or {}
+    itens = dados.get('itens', [])
+    cliente_id = dados.get('cliente_id')
+    desconto = dados.get('desconto', 0.0)
+    frete = dados.get('frete', 0.0)
+    forma_pagamento = dados.get('forma_pagamento', 'PIX')
+    endereco_entrega = dados.get('endereco_entrega')
+    data_prevista_entrega = dados.get('data_prevista_entrega')
+    observacoes = dados.get('observacoes')
+    responsavel = session.get('usuario_nome') or 'Vendedor'
+
+    try:
+        resultado = pedido_service.criar_pedido(
+            itens=itens,
+            cliente_id=cliente_id,
+            desconto=desconto,
+            frete=frete,
+            forma_pagamento=forma_pagamento,
+            endereco_entrega=endereco_entrega,
+            responsavel=responsavel,
+            data_prevista_entrega=data_prevista_entrega,
+            observacoes=observacoes
+        )
+        return jsonify(resultado), 201
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>/status', methods=['PATCH'])
+@login_required
+def atualizar_status_pedido(pedido_id):
+    perfil = session.get('usuario_perfil')
+    # Permissão para gerenciar status: Vendas, Gerência, Administrador, ou Estoque (operações de separação/expedição)
+    if perfil not in ['Vendas', 'Gerência', 'Administrador', 'Estoque']:
+        return jsonify({"erro": "Acesso não autorizado ao controle de pedidos."}), 403
+
+    dados = request.get_json() or {}
+    novo_status = dados.get('status', '').strip()
+    observacao = dados.get('observacao')
+    responsavel = session.get('usuario_nome') or 'Usuário'
+
+    # RBAC Específico: Estoque só pode avançar Em Separação, Pronto para Envio, etc.
+    if perfil == 'Estoque' and novo_status not in ['Em Separação', 'Pronto para Envio', 'Enviado']:
+        return jsonify({"erro": f"Perfil 'Estoque' não tem permissão para alterar status para '{novo_status}'."}), 403
+
+    try:
+        resultado = pedido_service.atualizar_status(
+            pedido_id=pedido_id,
+            novo_status=novo_status,
+            responsavel=responsavel,
+            observacao=observacao
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>/pagamento', methods=['PATCH'])
+@login_required
+def confirmar_pagamento_pedido(pedido_id):
+    perfil = session.get('usuario_perfil')
+    # Confirmação pertence ao Financeiro, Gerência ou Admin
+    if perfil not in ['Financeiro', 'Gerência', 'Administrador']:
+        return jsonify({"erro": "A confirmação de pagamento é restrita ao perfil Financeiro, Gerência ou Administrador."}), 403
+
+    dados = request.get_json() or {}
+    novo_status_pagamento = dados.get('status_pagamento', 'Aprovado')
+    transacao_id = dados.get('transacao_id')
+    comprovante = dados.get('comprovante')
+    responsavel = session.get('usuario_nome') or 'Operador Financeiro'
+
+    try:
+        resultado = pedido_service.confirmar_pagamento(
+            pedido_id=pedido_id,
+            novo_status_pagamento=novo_status_pagamento,
+            responsavel=responsavel,
+            transacao_id=transacao_id,
+            comprovante=comprovante
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>/cancelar', methods=['POST'])
+@login_required
+@require_permission('pedidos')
+def cancelar_pedido(pedido_id):
+    perfil = session.get('usuario_perfil')
+    # Cancelamento requer permissão de Gerência, Administrador ou Vendas
+    if perfil == 'Estoque':
+        return jsonify({"erro": "Perfil 'Estoque' não pode cancelar pedidos diretamente."}), 403
+
+    dados = request.get_json() or {}
+    motivo = dados.get('motivo')
+    if not motivo:
+        return jsonify({"erro": "Motivo do cancelamento é obrigatório."}), 400
+
+    responsavel = session.get('usuario_nome') or 'Usuário'
+
+    try:
+        resultado = pedido_service.cancelar_pedido(
+            pedido_id=pedido_id,
+            motivo=motivo,
+            responsavel=responsavel
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>/devolucao', methods=['POST'])
+@login_required
+@require_permission('pedidos')
+def solicitar_devolucao_pedido(pedido_id):
+    dados = request.get_json() or {}
+    motivo = dados.get('motivo')
+    if not motivo:
+        return jsonify({"erro": "Motivo da devolução é obrigatório."}), 400
+
+    responsavel = session.get('usuario_nome') or 'Atendente'
+
+    try:
+        resultado = pedido_service.solicitar_devolucao(
+            pedido_id=pedido_id,
+            motivo=motivo,
+            responsavel=responsavel
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/pedidos/<int:pedido_id>/conferir-devolucao', methods=['POST'])
+@login_required
+def conferir_devolucao_pedido(pedido_id):
+    perfil = session.get('usuario_perfil')
+    # Conferência física cabe ao Estoque, Gerência ou Admin
+    if perfil not in ['Estoque', 'Gerência', 'Administrador']:
+        return jsonify({"erro": "A conferência de devolução é restrita ao Estoque, Gerência ou Administrador."}), 403
+
+    dados = request.get_json() or {}
+    condicao_itens = dados.get('condicao_itens', 'Itens conferidos em perfeito estado.')
+    retornar_ao_estoque = dados.get('retornar_ao_estoque', True)
+    responsavel = session.get('usuario_nome') or 'Conferente Estoque'
+
+    try:
+        resultado = pedido_service.conferir_e_retornar_devolucao(
+            pedido_id=pedido_id,
+            conferente=responsavel,
+            condicao_itens=condicao_itens,
+            retornar_ao_estoque=retornar_ao_estoque
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
+# --- 4. MÓDULO CLIENTES ---
+
+@app.route('/api/clientes', methods=['GET'])
+@login_required
+@require_permission('clientes')
+def listar_clientes():
+    try:
+        clientes = cliente_service.listar_clientes()
+        return jsonify(clientes)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/clientes', methods=['POST'])
+@login_required
+@require_permission('clientes')
+def cadastrar_cliente():
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    email = dados.get('email')
+    telefone = dados.get('telefone', '')
+    cidade = dados.get('cidade', '')
+
+    try:
+        resultado = cliente_service.cadastrar_cliente(nome, email, telefone, cidade)
+        return jsonify(resultado), 201
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except pymysql.err.IntegrityError:
+        return jsonify({"erro": "Já existe um cliente cadastrado com este e-mail."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
+# --- 5. MÓDULO ADMINISTRAÇÃO DE USUÁRIOS (SOMENTE ADMINISTRADOR) ---
+
+@app.route('/api/perfis', methods=['GET'])
+@login_required
+@require_permission('usuarios')
+def listar_perfis():
+    try:
+        perfis = usuario_service.listar_perfis()
+        return jsonify(perfis)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/usuarios', methods=['GET'])
+@login_required
+@require_permission('usuarios')
+def listar_usuarios():
+    try:
+        usuarios = usuario_service.listar_usuarios()
+        return jsonify(usuarios)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/usuarios', methods=['POST'])
+@login_required
+@require_permission('usuarios')
+def cadastrar_usuario():
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    email = dados.get('email')
+    senha = dados.get('senha')
+    perfil_id = dados.get('perfil_id')
+    ativo = dados.get('ativo', True)
+
+    if not nome or not email or not senha or not perfil_id:
+        return jsonify({"erro": "Todos os campos (nome, email, senha e perfil) são obrigatórios."}), 400
+
+    try:
+        resultado = usuario_service.cadastrar_usuario(nome, email, senha, perfil_id, ativo)
+        return jsonify(resultado), 201
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except pymysql.err.IntegrityError:
+        return jsonify({"erro": "Já existe um usuário com este e-mail."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/usuarios/<int:usuario_id>', methods=['PUT'])
+@login_required
+@require_permission('usuarios')
+def editar_usuario(usuario_id):
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    email = dados.get('email')
+    perfil_id = dados.get('perfil_id')
+    senha = dados.get('senha')
+
+    if not nome or not email or not perfil_id:
+        return jsonify({"erro": "Nome, e-mail e perfil são obrigatórios."}), 400
+
+    try:
+        resultado = usuario_service.atualizar_usuario(usuario_id, nome, email, perfil_id, senha)
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except pymysql.err.IntegrityError:
+        return jsonify({"erro": "Já existe outro usuário com este e-mail."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/usuarios/<int:usuario_id>/status', methods=['PATCH'])
+@login_required
+@require_permission('usuarios')
+def alternar_status_usuario(usuario_id):
+    dados = request.get_json() or {}
+    ativo = dados.get('ativo')
+
+    if ativo is None:
+        return jsonify({"erro": "Campo 'ativo' (boolean) é obrigatório."}), 400
+
+    try:
+        resultado = usuario_service.alternar_status(usuario_id, ativo, session.get('usuario_id'))
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
