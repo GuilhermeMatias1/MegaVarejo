@@ -155,23 +155,401 @@ function navegarPara(moduloId) {
 }
 
 // ==========================================
-// 1. MÓDULO DASHBOARD
+// 1. MÓDULO DASHBOARD GERENCIAL (EXCLUSIVO ADMIN / GERÊNCIA)
 // ==========================================
+
+let dashAgrupamentoAtual = 'dia';
+let dashDadosCarregados = null;
+
+function alternarFiltroPeriodoDashboard() {
+    const periodo = document.getElementById('dash-seletor-periodo').value;
+    const boxPersonalizado = document.getElementById('dash-datas-personalizadas');
+    if (periodo === 'personalizado') {
+        boxPersonalizado.style.display = 'flex';
+    } else {
+        boxPersonalizado.style.display = 'none';
+        carregarDashboard();
+    }
+}
+
+function alterarAgrupamentoGrafico(novoAgrupamento) {
+    dashAgrupamentoAtual = novoAgrupamento;
+    document.querySelectorAll('.dash-agrupamento-btn-group .btn-outline').forEach(btn => btn.classList.remove('active'));
+    const btn = document.getElementById(`btn-agrup-${novoAgrupamento}`);
+    if (btn) btn.classList.add('active');
+    carregarDashboard();
+}
+
 async function carregarDashboard() {
+    const loadingElem = document.getElementById('dash-loading');
+    const erroBanner = document.getElementById('dash-erro-banner');
+    if (loadingElem) loadingElem.style.display = 'flex';
+    if (erroBanner) erroBanner.style.display = 'none';
+
     try {
-        const res = await fetch('/api/dashboard');
+        const periodo = document.getElementById('dash-seletor-periodo').value;
+        let url = `/api/dashboard?periodo=${encodeURIComponent(periodo)}&agrupamento=${encodeURIComponent(dashAgrupamentoAtual)}`;
+
+        if (periodo === 'personalizado') {
+            const dtIni = document.getElementById('dash-data-inicio').value;
+            const dtFim = document.getElementById('dash-data-fim').value;
+            if (dtIni && dtFim) {
+                url += `&data_inicio=${encodeURIComponent(dtIni)}&data_fim=${encodeURIComponent(dtFim)}`;
+            }
+        }
+
+        const res = await fetch(url);
         if (res.status === 401 || res.status === 403) {
             tratarErroAcesso(res);
             return;
         }
-        const dados = await res.json();
 
-        document.getElementById('dash-produtos').textContent = dados.total_produtos || 0;
-        document.getElementById('dash-pedidos').textContent = dados.total_pedidos || 0;
-        document.getElementById('dash-vendas').textContent = formatarMoeda(dados.total_vendas || 0);
+        const dados = await res.json();
+        if (!res.ok) {
+            throw new Error(dados.erro || 'Erro ao consultar indicadores do dashboard.');
+        }
+
+        dashDadosCarregados = dados;
+        renderizarDashboardGerencial(dados);
+
     } catch (err) {
-        mostrarAlerta('Erro ao carregar indicadores do dashboard.', 'erro');
+        if (erroBanner) {
+            erroBanner.textContent = `Falha ao sincronizar dashboard: ${err.message}`;
+            erroBanner.style.display = 'block';
+        }
+        mostrarAlerta(err.message, 'erro');
+    } finally {
+        if (loadingElem) loadingElem.style.display = 'none';
     }
+}
+
+function renderizarDashboardGerencial(d) {
+    if (!d) return;
+
+    // 1. Cabeçalho e Meta-informações
+    const ultAtElem = document.getElementById('dash-ultima-atualizacao');
+    if (ultAtElem && d.periodo) {
+        ultAtElem.textContent = `${d.periodo.ultima_atualizacao} (${d.periodo.data_inicio} até ${d.periodo.data_fim})`;
+    }
+
+    // 2. Alertas Gerenciais
+    if (d.alertas) {
+        const al = d.alertas;
+        document.getElementById('alerta-pedidos-atrasados').textContent = al.pedidos_atrasados || 0;
+        document.getElementById('alerta-estoque-baixo').textContent = al.produtos_estoque_critico || 0;
+        document.getElementById('alerta-entregas-atrasadas').textContent = al.entregas_atrasadas || 0;
+
+        const recVenc = al.contas_receber_vencidas || {};
+        document.getElementById('alerta-receber-vencidas').textContent = `${recVenc.quantidade || 0} (${formatarMoeda(recVenc.valor || 0)})`;
+
+        const pagVenc = al.contas_pagar_proximas_vencimento || {};
+        document.getElementById('alerta-pagar-vencendo').textContent = `${pagVenc.quantidade || 0} (${formatarMoeda(pagVenc.valor || 0)})`;
+    }
+
+    // 3. Indicadores Comerciais (KPIs)
+    if (d.kpis_comerciais) {
+        const k = d.kpis_comerciais;
+        document.getElementById('dash-faturamento').textContent = formatarMoeda(k.faturamento || 0);
+        document.getElementById('dash-pedidos-qtd').textContent = k.pedidos || 0;
+        document.getElementById('dash-ticket-medio').textContent = formatarMoeda(k.ticket_medio || 0);
+        document.getElementById('dash-novos-clientes').textContent = k.novos_clientes || 0;
+
+        renderizarBadgeComparativo('dash-faturamento-comp', k.faturamento_variacao_pct, k.faturamento_anterior, true);
+        renderizarBadgeComparativo('dash-pedidos-comp', k.pedidos_variacao_pct, k.pedidos_anterior, false);
+        renderizarBadgeComparativo('dash-ticket-comp', k.ticket_medio_variacao_pct, k.ticket_medio_anterior, true);
+        renderizarBadgeComparativo('dash-clientes-comp', k.novos_clientes_variacao_pct, k.novos_clientes_anterior, false);
+    }
+
+    // 4. Resumo Financeiro
+    if (d.resumo_financeiro) {
+        const f = d.resumo_financeiro;
+        document.getElementById('dash-fin-saldo').textContent = formatarMoeda(f.saldo_disponivel_caixa || 0);
+        document.getElementById('dash-fin-entradas').textContent = `+ ${formatarMoeda(f.entradas_no_periodo || 0)}`;
+        document.getElementById('dash-fin-saidas').textContent = `- ${formatarMoeda(f.saidas_no_periodo || 0)}`;
+        document.getElementById('dash-fin-receber').textContent = formatarMoeda(f.contas_receber_aberto || 0);
+        document.getElementById('dash-fin-pagar').textContent = formatarMoeda(f.contas_pagar_aberto || 0);
+    }
+
+    // 5. Gráficos em Canvas nativo
+    renderizarGraficoEvolucaoCanvas(d.grafico_evolucao || []);
+    renderizarGraficoStatusCanvas(d.distribuicao_status || []);
+
+    // 6. Operacional (Pedidos Recentes, Mais Vendidos, Entregas)
+    if (d.operacional) {
+        renderizarTabelaPedidosRecentes(d.operacional.pedidos_recentes || []);
+        renderizarTabelaMaisVendidos(d.operacional.produtos_mais_vendidos || []);
+        renderizarTabelaEntregas(d.operacional.entregas_em_andamento || []);
+    }
+
+    // 7. Atividades Recentes
+    renderizarTimelineAtividades(d.atividades_recentes || []);
+}
+
+function renderizarBadgeComparativo(elemId, variacaoPct, valorAnt, ehMoeda) {
+    const container = document.getElementById(elemId);
+    if (!container) return;
+
+    let classe = 'neutro';
+    let icone = '➔';
+    if (variacaoPct > 0) {
+        classe = 'positivo';
+        icone = '▲ +';
+    } else if (variacaoPct < 0) {
+        classe = 'negativo';
+        icone = '▼ ';
+    }
+
+    const valAntFormatado = ehMoeda ? formatarMoeda(valorAnt) : valorAnt;
+    container.innerHTML = `
+        <span class="badge-comparativo ${classe}">${icone}${Math.abs(variacaoPct)}%</span>
+        <span>vs ant. (${valAntFormatado})</span>
+    `;
+}
+
+// -------------------------------------------------------------
+// RENDERIZAÇÃO DOS GRÁFICOS COM CANVAS NATIVO (HTML5)
+// -------------------------------------------------------------
+function renderizarGraficoEvolucaoCanvas(dados) {
+    const canvas = document.getElementById('canvas-evolucao-faturamento');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.parentElement.clientWidth || 600;
+    const height = canvas.height = 220;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if (!dados || dados.length === 0) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Nenhum dado de faturamento no período selecionado.', width / 2, height / 2);
+        return;
+    }
+
+    const padding = { top: 30, right: 30, bottom: 40, left: 60 };
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+
+    const maxValor = Math.max(...dados.map(d => d.faturamento), 100);
+
+    // Linhas de grade e eixos Y
+    ctx.strokeStyle = '#f1f5f9';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'right';
+
+    for (let i = 0; i <= 4; i++) {
+        const yVal = (maxValor / 4) * i;
+        const yPos = padding.top + chartH - (i * (chartH / 4));
+        ctx.beginPath();
+        ctx.moveTo(padding.left, yPos);
+        ctx.lineTo(width - padding.right, yPos);
+        ctx.stroke();
+        ctx.fillText(formatarMoeda(yVal).replace(',00', ''), padding.left - 8, yPos + 4);
+    }
+
+    // Desenho de barras e rótulos
+    const barSpacing = chartW / dados.length;
+    const barWidth = Math.min(36, barSpacing * 0.65);
+
+    dados.forEach((d, idx) => {
+        const barH = (d.faturamento / maxValor) * chartH;
+        const x = padding.left + (idx * barSpacing) + (barSpacing - barWidth) / 2;
+        const y = padding.top + chartH - barH;
+
+        // Barra
+        ctx.fillStyle = '#0284c7';
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(x, y, barWidth, barH, [4, 4, 0, 0]) : ctx.rect(x, y, barWidth, barH);
+        ctx.fill();
+
+        // Rótulo de data no eixo X
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(d.rotulo, x + (barWidth / 2), height - padding.bottom + 18);
+
+        // Valor no topo se houver espaço
+        if (barH > 20) {
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '9px sans-serif';
+            ctx.fillText(formatarMoeda(d.faturamento).replace('R$', '').trim(), x + (barWidth / 2), y - 6);
+        }
+    });
+}
+
+function renderizarGraficoStatusCanvas(dados) {
+    const canvas = document.getElementById('canvas-distribuicao-status');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = canvas.parentElement.clientWidth || 300;
+    const height = canvas.height = 220;
+
+    ctx.clearRect(0, 0, width, height);
+
+    if (!dados || dados.length === 0) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Nenhum pedido no período.', width / 2, height / 2);
+        return;
+    }
+
+    const cores = {
+        'Aguardando Pagamento': '#f59e0b',
+        'Confirmado': '#10b981',
+        'Aguardando Separação': '#06b6d4',
+        'Em Separação': '#3b82f6',
+        'Pronto para Envio': '#8b5cf6',
+        'Enviado': '#0284c7',
+        'Em Transporte': '#6366f1',
+        'Entregue': '#15803d',
+        'Cancelado': '#ef4444',
+        'Devolução Solicitada': '#ec4899',
+        'Devolvido': '#64748b',
+        'Recusado': '#475569'
+    };
+
+    const totalQtd = dados.reduce((acc, cur) => acc + cur.quantidade, 0);
+    const centerX = width * 0.38;
+    const centerY = height / 2;
+    const outerRadius = Math.min(centerX, centerY) - 15;
+    const innerRadius = outerRadius * 0.55;
+
+    let startAngle = -0.5 * Math.PI;
+
+    dados.forEach(d => {
+        const sliceAngle = (d.quantidade / totalQtd) * (2 * Math.PI);
+        const cor = cores[d.status] || '#94a3b8';
+
+        ctx.fillStyle = cor;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, outerRadius, startAngle, startAngle + sliceAngle);
+        ctx.arc(centerX, centerY, innerRadius, startAngle + sliceAngle, startAngle, true);
+        ctx.closePath();
+        ctx.fill();
+
+        startAngle += sliceAngle;
+    });
+
+    // Legenda lateral
+    const legendX = width * 0.68;
+    let legendY = 24;
+    ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif';
+
+    dados.slice(0, 6).forEach(d => {
+        const cor = cores[d.status] || '#94a3b8';
+        ctx.fillStyle = cor;
+        ctx.fillRect(legendX, legendY, 10, 10);
+
+        ctx.fillStyle = '#334155';
+        const pct = Math.round((d.quantidade / totalQtd) * 100);
+        ctx.fillText(`${d.status}: ${d.quantidade} (${pct}%)`, legendX + 16, legendY + 9);
+        legendY += 20;
+    });
+}
+
+// -------------------------------------------------------------
+// TABELAS OPERACIONAIS E AUDITORIA DE ATIVIDADES
+// -------------------------------------------------------------
+function renderizarTabelaPedidosRecentes(pedidos) {
+    const tbody = document.getElementById('dash-tabela-pedidos-recentes');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!pedidos || pedidos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="texto-vazio">Nenhum pedido recente registrado.</td></tr>';
+        return;
+    }
+
+    pedidos.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => navegarPara('pedidos');
+        tr.innerHTML = `
+            <td><strong>${p.numero_pedido}</strong></td>
+            <td>${p.cliente}</td>
+            <td>${p.data}</td>
+            <td><strong>${formatarMoeda(p.valor)}</strong></td>
+            <td><span class="badge ${obterClasseBadge(p.status)}">${p.status}</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function renderizarTabelaMaisVendidos(produtos) {
+    const tbody = document.getElementById('dash-tabela-mais-vendidos');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!produtos || produtos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="texto-vazio">Nenhum produto vendido no período.</td></tr>';
+        return;
+    }
+
+    produtos.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><strong>${p.nome}</strong></td>
+            <td><span class="badge" style="background: #f1f5f9; color: #475569;">${p.categoria}</span></td>
+            <td><strong style="color: #0284c7;">${p.quantidade_vendida} un</strong></td>
+            <td><strong style="color: #10b981;">${formatarMoeda(p.receita_total)}</strong></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function renderizarTabelaEntregas(entregas) {
+    const tbody = document.getElementById('dash-tabela-entregas');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!entregas || entregas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="texto-vazio">Nenhuma entrega em trânsito no momento.</td></tr>';
+        return;
+    }
+
+    entregas.forEach(e => {
+        const tr = document.createElement('tr');
+        const alertaAtraso = e.atrasado ? '<span style="color: #ef4444; font-weight: bold; margin-left: 4px;">(Atrasado)</span>' : '';
+        tr.innerHTML = `
+            <td><strong>${e.numero_pedido}</strong></td>
+            <td>${e.cliente}<br><small style="color: #64748b;">${e.destino}</small></td>
+            <td>${e.previsao_entrega} ${alertaAtraso}</td>
+            <td><span class="badge ${obterClasseBadge(e.status)}">${e.status}</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function renderizarTimelineAtividades(atividades) {
+    const container = document.getElementById('dash-timeline-atividades');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!atividades || atividades.length === 0) {
+        container.innerHTML = '<div class="texto-vazio">Nenhuma atividade registrada recentemente.</div>';
+        return;
+    }
+
+    atividades.forEach(a => {
+        const item = document.createElement('div');
+        item.className = 'timeline-item';
+        item.innerHTML = `
+            <div class="timeline-icone">${a.icone || '📝'}</div>
+            <div class="timeline-corpo">
+                <div class="timeline-titulo">${a.titulo}</div>
+                <div class="timeline-desc">${a.descricao}</div>
+                <div class="timeline-meta">
+                    <span>🕒 ${a.data_formatada}</span>
+                    <span>👤 ${a.responsavel}</span>
+                </div>
+            </div>
+        `;
+        container.appendChild(item);
+    });
 }
 
 // ==========================================

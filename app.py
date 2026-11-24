@@ -1,6 +1,20 @@
 import os
+import logging
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 import pymysql
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Configuração de logging profissional
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Middlewares e Services
 from controllers.auth_middleware import login_required, require_permission, require_action
@@ -131,17 +145,28 @@ def api_me():
     })
 
 
-# --- 1. MÓDULO DASHBOARD (API) ---
+# --- 1. MÓDULO DASHBOARD GERENCIAL (API) ---
 
 @app.route('/api/dashboard', methods=['GET'])
 @login_required
 @require_permission('dashboard')
 def get_dashboard():
+    periodo = request.args.get('periodo', '30dias')
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+    agrupamento = request.args.get('agrupamento')
+
     try:
-        metricas = dashboard_service.obter_metricas()
+        metricas = dashboard_service.obter_metricas(
+            periodo=periodo,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            agrupamento_forcado=agrupamento
+        )
         return jsonify(metricas)
     except Exception as e:
-        return jsonify({'erro': str(e)}), 500
+        logger.exception("Erro ao processar métricas do dashboard: %s", e)
+        return jsonify({'erro': 'Erro interno ao carregar os indicadores do dashboard.'}), 500
 
 
 # --- 2. MÓDULO ESTOQUE (PRODUTOS, MOVIMENTAÇÕES, AJUSTES E RELATÓRIOS) ---

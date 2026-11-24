@@ -58,25 +58,313 @@
             <!-- Feedback / Mensagens de Notificação -->
             <div id="alerta" class="alerta" style="display: none;"></div>
 
-            <!-- 1. MÓDULO DASHBOARD GERAL -->
+            <!-- 1. MÓDULO DASHBOARD GERENCIAL (EXCLUSIVO ADMIN / GERÊNCIA) -->
             <section id="modulo-dashboard" class="modulo">
-                <header class="section-header">
-                    <h1>Dashboard Corporativo</h1>
-                    <p>Visão geral dos indicadores de desempenho da MegaVarejo.</p>
+                <!-- 1. Cabeçalho Gerencial -->
+                <header class="section-header dash-header-gerencial">
+                    <div class="dash-titulo-box">
+                        <h1>📊 Dashboard Gerencial</h1>
+                        <p>Visão executiva e analítica integrada do desempenho comercial, financeiro e operacional da MegaVarejo S.A.</p>
+                        <div class="dash-meta-info">
+                            <span>🕒 Última sincronização: <strong id="dash-ultima-atualizacao">--:--:--</strong></span>
+                            <span class="dash-tag-perfil">Acesso Executivo Restrito</span>
+                        </div>
+                    </div>
+
+                    <div class="dash-filtros-bar">
+                        <div class="dash-filtro-item">
+                            <label for="dash-seletor-periodo"><small>Período de Análise</small></label>
+                            <select id="dash-seletor-periodo" class="input-padrao" onchange="alternarFiltroPeriodoDashboard()">
+                                <option value="hoje">Hoje</option>
+                                <option value="7dias">Últimos 7 dias</option>
+                                <option value="30dias" selected>Últimos 30 dias</option>
+                                <option value="mes_atual">Mês Atual</option>
+                                <option value="ano_atual">Ano Atual</option>
+                                <option value="personalizado">Personalizado...</option>
+                            </select>
+                        </div>
+
+                        <div id="dash-datas-personalizadas" class="dash-filtro-item" style="display: none;">
+                            <label><small>De / Até</small></label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="date" id="dash-data-inicio" class="input-padrao">
+                                <input type="date" id="dash-data-fim" class="input-padrao">
+                            </div>
+                        </div>
+
+                        <div class="dash-filtro-item" style="align-self: flex-end;">
+                            <button class="btn btn-primary" onclick="carregarDashboard()" id="btn-atualizar-dash">
+                                🔄 Atualizar Indicadores
+                            </button>
+                        </div>
+                    </div>
                 </header>
 
-                <div class="cards-grid">
-                    <div class="card">
-                        <div class="card-title">Quantidade de Produtos</div>
-                        <div class="card-value" id="dash-produtos">0</div>
+                <!-- Estado de Carregamento e Alertas da Tela -->
+                <div id="dash-loading" class="dash-loading-spinner" style="display: none;">
+                    <div class="spinner"></div> Carregando indicadores gerenciais em tempo real...
+                </div>
+                <div id="dash-erro-banner" class="alerta alerta-erro" style="display: none; margin-bottom: 20px;"></div>
+
+                <!-- 5. Alertas Gerenciais (Badges de atenção com links para os módulos) -->
+                <div class="dash-secao-titulo">
+                    <h3>⚠️ Alertas Operacionais e Gerenciais</h3>
+                    <small>Pendências críticas que exigem atenção imediata da administração</small>
+                </div>
+                <div class="dash-alertas-grid" id="dash-alertas-container">
+                    <div class="alerta-card alerta-card-danger" onclick="navegarPara('pedidos')">
+                        <div class="alerta-icon">⏱️</div>
+                        <div class="alerta-info">
+                            <h4 id="alerta-pedidos-atrasados">0</h4>
+                            <span>Pedidos Atrasados</span>
+                        </div>
+                        <div class="alerta-link">Ver Pedidos ➔</div>
                     </div>
-                    <div class="card">
-                        <div class="card-title">Quantidade de Pedidos</div>
-                        <div class="card-value" id="dash-pedidos">0</div>
+
+                    <div class="alerta-card alerta-card-warning" onclick="navegarPara('produtos')">
+                        <div class="alerta-icon">📦</div>
+                        <div class="alerta-info">
+                            <h4 id="alerta-estoque-baixo">0</h4>
+                            <span>Estoque Baixo / Crítico</span>
+                        </div>
+                        <div class="alerta-link">Repor Estoque ➔</div>
                     </div>
-                    <div class="card highlight">
-                        <div class="card-title">Total de Vendas</div>
-                        <div class="card-value" id="dash-vendas">R$ 0,00</div>
+
+                    <div class="alerta-card alerta-card-danger" onclick="navegarPara('financeiro')">
+                        <div class="alerta-icon">📅</div>
+                        <div class="alerta-info">
+                            <h4 id="alerta-receber-vencidas">0</h4>
+                            <span>Contas a Receber Vencidas</span>
+                        </div>
+                        <div class="alerta-link">Cobrança ➔</div>
+                    </div>
+
+                    <div class="alerta-card alerta-card-warning" onclick="navegarPara('financeiro')">
+                        <div class="alerta-icon">💸</div>
+                        <div class="alerta-info">
+                            <h4 id="alerta-pagar-vencendo">0</h4>
+                            <span>Contas a Pagar a Vencer (3d)</span>
+                        </div>
+                        <div class="alerta-link">Ver Contas ➔</div>
+                    </div>
+
+                    <div class="alerta-card alerta-card-info" onclick="navegarPara('pedidos')">
+                        <div class="alerta-icon">🚚</div>
+                        <div class="alerta-info">
+                            <h4 id="alerta-entregas-atrasadas">0</h4>
+                            <span>Entregas em Atraso</span>
+                        </div>
+                        <div class="alerta-link">Expedição ➔</div>
+                    </div>
+                </div>
+
+                <!-- 2. Indicadores Comerciais (KPIs) com Comparativo Histórico -->
+                <div class="dash-secao-titulo" style="margin-top: 25px;">
+                    <h3>📈 Indicadores Comerciais (Período Selecionado)</h3>
+                    <small>Faturamento bruto de pedidos não cancelados, volume de vendas, ticket médio e expansão da base de clientes</small>
+                </div>
+                <div class="cards-grid dash-kpis-grid">
+                    <div class="card card-kpi-gerencial">
+                        <div class="card-kpi-topo">
+                            <span class="card-title">Faturamento no Período</span>
+                            <span class="card-kpi-icon">💰</span>
+                        </div>
+                        <div class="card-value" id="dash-faturamento">R$ 0,00</div>
+                        <div class="card-kpi-comparativo" id="dash-faturamento-comp">
+                            <span class="badge-comparativo neutro">--%</span> vs período anterior
+                        </div>
+                        <small class="card-criterio">Soma do valor total dos pedidos confirmados/em andamento</small>
+                    </div>
+
+                    <div class="card card-kpi-gerencial">
+                        <div class="card-kpi-topo">
+                            <span class="card-title">Quantidade de Pedidos</span>
+                            <span class="card-kpi-icon">🛒</span>
+                        </div>
+                        <div class="card-value" id="dash-pedidos-qtd">0</div>
+                        <div class="card-kpi-comparativo" id="dash-pedidos-comp">
+                            <span class="badge-comparativo neutro">--%</span> vs período anterior
+                        </div>
+                        <small class="card-criterio">Total de vendas criadas no intervalo (exceto canceladas)</small>
+                    </div>
+
+                    <div class="card card-kpi-gerencial">
+                        <div class="card-kpi-topo">
+                            <span class="card-title">Ticket Médio</span>
+                            <span class="card-kpi-icon">🏷️</span>
+                        </div>
+                        <div class="card-value" id="dash-ticket-medio">R$ 0,00</div>
+                        <div class="card-kpi-comparativo" id="dash-ticket-comp">
+                            <span class="badge-comparativo neutro">--%</span> vs período anterior
+                        </div>
+                        <small class="card-criterio">Faturamento dividido pelo total de pedidos no período</small>
+                    </div>
+
+                    <div class="card card-kpi-gerencial">
+                        <div class="card-kpi-topo">
+                            <span class="card-title">Novos Clientes</span>
+                            <span class="card-kpi-icon">👥</span>
+                        </div>
+                        <div class="card-value" id="dash-novos-clientes">0</div>
+                        <div class="card-kpi-comparativo" id="dash-clientes-comp">
+                            <span class="badge-comparativo neutro">--%</span> vs período anterior
+                        </div>
+                        <small class="card-criterio">Cadastros de novos clientes concluídos no período</small>
+                    </div>
+                </div>
+
+                <!-- 3. Resumo Financeiro (Livro-Caixa e Títulos) -->
+                <div class="dash-secao-titulo" style="margin-top: 25px;">
+                    <h3>💵 Resumo Financeiro Executivo</h3>
+                    <small>Fluxo de caixa efetivo e posições a receber e pagar (respeitando a distinção entre faturamento e caixa)</small>
+                </div>
+                <div class="cards-grid dash-financeiro-grid">
+                    <div class="card card-destaque-fin" style="border-left: 4px solid #10b981;">
+                        <span class="card-title">Saldo Disponível em Caixa</span>
+                        <div class="card-value" id="dash-fin-saldo" style="color: #10b981;">R$ 0,00</div>
+                        <small class="card-criterio">Dinheiro efetivamente recebido e disponível</small>
+                    </div>
+
+                    <div class="card card-destaque-fin" style="border-left: 4px solid #3b82f6;">
+                        <span class="card-title">Entradas Efetivas (Período)</span>
+                        <div class="card-value" id="dash-fin-entradas" style="color: #2563eb;">R$ 0,00</div>
+                        <small class="card-criterio">Lançamentos de crédito realizados no livro-caixa</small>
+                    </div>
+
+                    <div class="card card-destaque-fin" style="border-left: 4px solid #ef4444;">
+                        <span class="card-title">Saídas Efetivas (Período)</span>
+                        <div class="card-value" id="dash-fin-saidas" style="color: #dc2626;">R$ 0,00</div>
+                        <small class="card-criterio">Pagamentos de despesas e estornos liquidados</small>
+                    </div>
+
+                    <div class="card card-destaque-fin" style="border-left: 4px solid #f59e0b;">
+                        <span class="card-title">A Receber em Aberto</span>
+                        <div class="card-value" id="dash-fin-receber" style="color: #d97706;">R$ 0,00</div>
+                        <small class="card-criterio">Valores faturados pendentes de quitação</small>
+                    </div>
+
+                    <div class="card card-destaque-fin" style="border-left: 4px solid #8b5cf6;">
+                        <span class="card-title">A Pagar em Aberto</span>
+                        <div class="card-value" id="dash-fin-pagar" style="color: #7c3aed;">R$ 0,00</div>
+                        <small class="card-criterio">Compromissos pendentes com fornecedores</small>
+                    </div>
+                </div>
+
+                <!-- 4. Desempenho de Vendas: Gráficos -->
+                <div class="dash-graficos-row" style="margin-top: 25px;">
+                    <div class="dash-grafico-container" style="flex: 2;">
+                        <div class="dash-grafico-header">
+                            <div>
+                                <h4>📊 Evolução do Faturamento</h4>
+                                <small>Faturamento bruto ao longo do tempo</small>
+                            </div>
+                            <div class="dash-agrupamento-btn-group">
+                                <button class="btn btn-sm btn-outline active" id="btn-agrup-dia" onclick="alterarAgrupamentoGrafico('dia')">Dia</button>
+                                <button class="btn btn-sm btn-outline" id="btn-agrup-semana" onclick="alterarAgrupamentoGrafico('semana')">Semana</button>
+                                <button class="btn btn-sm btn-outline" id="btn-agrup-mes" onclick="alterarAgrupamentoGrafico('mes')">Mês</button>
+                            </div>
+                        </div>
+                        <div class="dash-canvas-box" id="dash-grafico-evolucao-container">
+                            <canvas id="canvas-evolucao-faturamento" height="220"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="dash-grafico-container" style="flex: 1;">
+                        <div class="dash-grafico-header">
+                            <div>
+                                <h4>🍩 Distribuição por Status</h4>
+                                <small>Volume de pedidos no período</small>
+                            </div>
+                        </div>
+                        <div class="dash-canvas-box" id="dash-grafico-status-container">
+                            <canvas id="canvas-distribuicao-status" height="220"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6 & 7. Desempenho Operacional e Atividades Recentes -->
+                <div class="dash-operacional-grid" style="margin-top: 25px;">
+                    <!-- Coluna Esquerda: Pedidos Recentes e Produtos Mais Vendidos -->
+                    <div class="dash-coluna-operacional">
+                        <div class="dash-card-tabela">
+                            <div class="dash-tabela-header">
+                                <h4>🛍️ Pedidos Recentes</h4>
+                                <button class="btn btn-link btn-sm" onclick="navegarPara('pedidos')">Ver Todos ➔</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="tabela-padrao">
+                                    <thead>
+                                        <tr>
+                                            <th>Pedido</th>
+                                            <th>Cliente</th>
+                                            <th>Data</th>
+                                            <th>Total</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dash-tabela-pedidos-recentes">
+                                        <tr><td colspan="5" class="texto-vazio">Nenhum pedido recente.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="dash-card-tabela" style="margin-top: 20px;">
+                            <div class="dash-tabela-header">
+                                <h4>🏆 Produtos Mais Vendidos no Período</h4>
+                                <button class="btn btn-link btn-sm" onclick="navegarPara('produtos')">Estoque ➔</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="tabela-padrao">
+                                    <thead>
+                                        <tr>
+                                            <th>Produto</th>
+                                            <th>Categoria</th>
+                                            <th>Qtd Vendida</th>
+                                            <th>Receita Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dash-tabela-mais-vendidos">
+                                        <tr><td colspan="4" class="texto-vazio">Nenhum produto vendido no intervalo.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="dash-card-tabela" style="margin-top: 20px;">
+                            <div class="dash-tabela-header">
+                                <h4>🚚 Entregas em Andamento</h4>
+                                <button class="btn btn-link btn-sm" onclick="navegarPara('pedidos')">Expedição ➔</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="tabela-padrao">
+                                    <thead>
+                                        <tr>
+                                            <th>Pedido</th>
+                                            <th>Cliente / Destino</th>
+                                            <th>Previsão</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dash-tabela-entregas">
+                                        <tr><td colspan="4" class="texto-vazio">Nenhuma entrega em andamento.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Coluna Direita: Auditoria de Atividades Recentes -->
+                    <div class="dash-coluna-atividades">
+                        <div class="dash-card-atividades">
+                            <div class="dash-tabela-header">
+                                <h4>📜 Atividades Recentes no Sistema</h4>
+                                <small>Auditoria em tempo real</small>
+                            </div>
+                            <div class="dash-timeline-atividades" id="dash-timeline-atividades">
+                                <div class="texto-vazio">Carregando atividades...</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>

@@ -119,9 +119,12 @@ class TestPOOPilares(unittest.TestCase):
         permissoes_modulo_pedidos = [u.pode_acessar('pedidos') for u in usuarios]
         self.assertEqual(permissoes_modulo_pedidos, [True, False, True, True])
 
-        # Módulo 'dashboard' e 'produtos' são acessíveis por todos
+        # Módulo 'dashboard' é restrito exclusivamente a Administrador e Gerência
+        permissoes_modulo_dashboard = [u.pode_acessar('dashboard') for u in usuarios]
+        self.assertEqual(permissoes_modulo_dashboard, [True, False, False, True])
+
+        # Módulo 'produtos' é acessível por todos
         for u in usuarios:
-            self.assertTrue(u.pode_acessar('dashboard'))
             self.assertTrue(u.pode_acessar('produtos'))
 
 if __name__ == '__main__':

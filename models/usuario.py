@@ -151,12 +151,12 @@ class Administrador(Usuario):
 
 class Estoquista(Usuario):
     """
-    Especialização Estoque: Acesso ao Dashboard e Estoque/Produtos.
+    Especialização Estoque: Acesso a Estoque/Produtos.
     Operações permitidas: entradas, saídas, ajustes, conferência de devoluções e separação/expedição.
     Operações proibidas: alterar preços, cadastrar/editar pedidos, gerenciar clientes, usuários ou financeiro.
     Demonstra POLIMORFISMO.
     """
-    PERMISSOES = {'dashboard', 'produtos', 'estoque'}
+    PERMISSOES = {'produtos', 'estoque'}
     ACOES_PERMITIDAS = {
         'cadastrar_produto', 'editar_produto', 'movimentar_estoque', 'ajustar_estoque',
         'conferir_devolucao', 'separar_expedir_pedido'
@@ -177,13 +177,13 @@ class Estoquista(Usuario):
 
 class Vendedor(Usuario):
     """
-    Especialização Vendas: Acesso ao Dashboard, Estoque (apenas consulta), Pedidos e Clientes.
+    Especialização Vendas: Acesso a Estoque (apenas consulta), Pedidos e Clientes.
     Operações permitidas: cadastrar e gerenciar clientes, criar e gerenciar pedidos, solicitar cancelamento e devolução.
     Operações proibidas: movimentação manual ou ajuste de estoque, alteração de produtos/preços,
     confirmação manual de pagamentos, financeiro ou usuários.
     Demonstra POLIMORFISMO.
     """
-    PERMISSOES = {'dashboard', 'produtos', 'estoque', 'pedidos', 'clientes'}
+    PERMISSOES = {'produtos', 'estoque', 'pedidos', 'clientes'}
     ACOES_PERMITIDAS = {
         'cadastrar_cliente', 'editar_cliente', 'criar_pedido', 'gerenciar_pedido',
         'cancelar_pedido', 'solicitar_devolucao'
@@ -204,7 +204,7 @@ class Vendedor(Usuario):
 
 class Gerente(Usuario):
     """
-    Especialização Gerência: Supervisão e consulta geral dos módulos permitidos.
+    Especialização Gerência: Supervisão e consulta geral dos módulos permitidos, incluindo o Dashboard Gerencial.
     Acesso a Dashboard, Estoque (consulta), Pedidos, Clientes (consulta) e Financeiro (consulta).
     Operações permitidas: supervisão, alteração de status operacional de pedidos, conferência/aprovação de devoluções.
     Operações proibidas: confirmação manual de pagamentos (restrita ao Financeiro/Admin), alteração de preços,
@@ -232,14 +232,14 @@ class Gerente(Usuario):
 
 class Financeiro(Usuario):
     """
-    Especialização Financeiro: Acesso ao Dashboard, Pedidos (apenas consulta) e Financeiro.
+    Especialização Financeiro: Acesso a Pedidos (apenas consulta) e Financeiro.
     Operações permitidas: consultar pedidos, confirmar pagamentos, registrar estornos/reembolsos,
     cadastrar fornecedores, cadastrar contas a pagar, quitar contas (saída de caixa) e conciliações.
     Operações proibidas: criação ou alteração operacional de pedidos (itens, frete, status operacional),
     movimentações de estoque, alteração de clientes ou usuários.
     Demonstra POLIMORFISMO.
     """
-    PERMISSOES = {'dashboard', 'pedidos', 'financeiro'}
+    PERMISSOES = {'pedidos', 'financeiro'}
     ACOES_PERMITIDAS = {
         'confirmar_pagamento', 'registrar_reembolso', 'pagar_despesa',
         'cadastrar_despesa', 'cadastrar_fornecedor'

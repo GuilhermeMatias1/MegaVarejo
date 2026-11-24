@@ -90,9 +90,9 @@ class TestAuthRBAC(unittest.TestCase):
             sess['usuario_id'] = 2
             sess['usuario_perfil'] = 'Estoque'
 
-        # Estoque PODE acessar Dashboard e Produtos
+        # Estoque NAO PODE acessar Dashboard Gerencial, Pedidos, Clientes ou Usuarios
         res_dash = self.client.get('/api/dashboard')
-        self.assertEqual(res_dash.status_code, 200)
+        self.assertEqual(res_dash.status_code, 403)
 
         res_prod = self.client.get('/api/produtos')
         self.assertEqual(res_prod.status_code, 200)
@@ -121,8 +121,8 @@ class TestAuthRBAC(unittest.TestCase):
             sess['usuario_id'] = 3
             sess['usuario_perfil'] = 'Vendas'
 
-        # Vendas PODE: Dashboard, Produtos, Pedidos, Clientes
-        self.assertEqual(self.client.get('/api/dashboard').status_code, 200)
+        # Vendas PODE: Produtos, Pedidos, Clientes. NAO PODE: Dashboard Gerencial
+        self.assertEqual(self.client.get('/api/dashboard').status_code, 403)
         self.assertEqual(self.client.get('/api/produtos').status_code, 200)
         self.assertEqual(self.client.get('/api/pedidos').status_code, 200)
         self.assertEqual(self.client.get('/api/clientes').status_code, 200)
@@ -188,8 +188,8 @@ class TestAuthRBAC(unittest.TestCase):
             sess['usuario_id'] = 5
             sess['usuario_perfil'] = 'Financeiro'
 
-        # Financeiro PODE acessar Dashboard, Pedidos (consulta) e Financeiro
-        self.assertEqual(self.client.get('/api/dashboard').status_code, 200)
+        # Financeiro PODE acessar Pedidos (consulta) e Financeiro. NÃO PODE: Dashboard Gerencial
+        self.assertEqual(self.client.get('/api/dashboard').status_code, 403)
         self.assertEqual(self.client.get('/api/pedidos').status_code, 200)
         self.assertEqual(self.client.get('/api/financeiro/visao-geral').status_code, 200)
 
