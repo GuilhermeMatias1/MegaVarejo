@@ -339,22 +339,101 @@
             <section id="modulo-pedidos" class="modulo">
                 <header class="section-header">
                     <h1>Módulo de Pedidos</h1>
-                    <p>Crie novos pedidos com baixa automática de estoque e altere o status.</p>
+                    <p>Gestão completa de vendas, reservas automáticas de estoque e acompanhamento de fluxo.</p>
                 </header>
 
-                <!-- Criar Pedido -->
-                <div class="painel-form">
-                    <h3>Novo Pedido</h3>
+                <!-- 1. Indicadores Operacionais Clicáveis -->
+                <div class="cards-grid pedidos-kpis" style="margin-bottom: 24px;">
+                    <div class="card card-kpi-pedido" id="kpi-card-aguardando_pagamento" onclick="filtrarPorIndicador('Aguardando Pagamento')" title="Filtrar pedidos aguardando pagamento">
+                        <div class="card-icon">💳</div>
+                        <div class="card-info">
+                            <span class="card-label">Aguardando Pagamento</span>
+                            <strong class="card-value" id="kpi-pedidos-aguardando-pagamento">0</strong>
+                        </div>
+                    </div>
+                    <div class="card card-kpi-pedido" id="kpi-card-aguardando_separacao" onclick="filtrarPorIndicador('Aguardando Separação')" title="Filtrar pedidos aguardando separação">
+                        <div class="card-icon">📋</div>
+                        <div class="card-info">
+                            <span class="card-label">Aguardando Separação</span>
+                            <strong class="card-value" id="kpi-pedidos-aguardando-separacao">0</strong>
+                        </div>
+                    </div>
+                    <div class="card card-kpi-pedido" id="kpi-card-em_separacao" onclick="filtrarPorIndicador('Em Separação')" title="Filtrar pedidos em separação">
+                        <div class="card-icon">📦</div>
+                        <div class="card-info">
+                            <span class="card-label">Em Separação</span>
+                            <strong class="card-value" id="kpi-pedidos-em-separacao">0</strong>
+                        </div>
+                    </div>
+                    <div class="card card-kpi-pedido" id="kpi-card-pronto_para_envio" onclick="filtrarPorIndicador('Pronto para Envio')" title="Filtrar pedidos prontos para envio">
+                        <div class="card-icon">🚚</div>
+                        <div class="card-info">
+                            <span class="card-label">Prontos para Envio</span>
+                            <strong class="card-value" id="kpi-pedidos-prontos-envio">0</strong>
+                        </div>
+                    </div>
+                    <div class="card card-kpi-pedido card-kpi-alerta" id="kpi-card-atrasados" onclick="filtrarPorIndicador('Atrasados')" title="Filtrar pedidos com data prevista ultrapassada">
+                        <div class="card-icon">⏰</div>
+                        <div class="card-info">
+                            <span class="card-label">Atrasados</span>
+                            <strong class="card-value" id="kpi-pedidos-atrasados">0</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Formulário de Criação de Novo Pedido (Visível para Vendas/Gerência/Admin) -->
+                <div class="painel-form" id="painel-criar-pedido">
+                    <h3>Novo Pedido de Venda</h3>
+                    <p style="margin-bottom: 16px; color: #64748b; font-size: 0.9rem;">
+                        Selecione o cliente, adicione produtos e defina as condições comerciais. O estoque disponível será reservado automaticamente.
+                    </p>
+
+                    <div class="form-row">
+                        <div class="form-group flex-2">
+                            <label for="pedido-cliente-select">Cliente *</label>
+                            <select id="pedido-cliente-select" onchange="aoSelecionarClientePedido()">
+                                <option value="">-- Selecione o cliente --</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label for="pedido-forma-pagamento">Forma de Pagamento *</label>
+                            <select id="pedido-forma-pagamento">
+                                <option value="PIX">PIX</option>
+                                <option value="Boleto Bancário">Boleto Bancário</option>
+                                <option value="Cartão de Crédito">Cartão de Crédito</option>
+                                <option value="Transferência Bancária">Transferência Bancária</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label for="pedido-data-prevista">Data Prevista de Entrega</label>
+                            <input type="date" id="pedido-data-prevista">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group flex-2">
+                            <label for="pedido-endereco-entrega">Endereço de Entrega</label>
+                            <input type="text" id="pedido-endereco-entrega" placeholder="Rua, número, bairro, cidade - UF">
+                        </div>
+                        <div class="form-group flex-2">
+                            <label for="pedido-observacoes">Observações Internas</label>
+                            <input type="text" id="pedido-observacoes" placeholder="Ex: Entregar em horário comercial, embalagem reforçada...">
+                        </div>
+                    </div>
+
+                    <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 16px 0;">
+
+                    <!-- Seleção de Itens -->
                     <div class="pedido-builder">
                         <div class="form-row">
                             <div class="form-group flex-2">
-                                <label for="pedido-produto-select">Selecione o Produto</label>
-                                <select id="pedido-produto-select">
-                                    <option value="">Carregando produtos disponíveis...</option>
+                                <label for="pedido-produto-select">Produto *</label>
+                                <select id="pedido-produto-select" onchange="atualizarInfoDisponibilidadeProduto()">
+                                    <option value="">Carregando produtos...</option>
                                 </select>
                             </div>
                             <div class="form-group flex-1">
-                                <label for="pedido-quantidade">Quantidade</label>
+                                <label for="pedido-quantidade">Quantidade *</label>
                                 <input type="number" id="pedido-quantidade" min="1" value="1">
                             </div>
                             <div class="form-group flex-auto" style="align-self: flex-end;">
@@ -362,46 +441,125 @@
                             </div>
                         </div>
 
-                        <!-- Itens Selecionados no Pedido Atual -->
+                        <!-- Tabela de Itens Selecionados -->
                         <div class="itens-pedido-carrinho">
-                            <h4>Itens Selecionados</h4>
+                            <h4>Itens do Pedido</h4>
                             <table class="tabela compact">
                                 <thead>
                                     <tr>
+                                        <th>Código</th>
                                         <th>Produto</th>
                                         <th>Preço Unit.</th>
                                         <th>Qtd</th>
                                         <th>Subtotal</th>
-                                        <th>Remover</th>
+                                        <th style="width: 60px;">Ação</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tabela-itens-pedido-corpo">
-                                    <tr><td colspan="5" style="text-align: center; color: #777;">Nenhum item adicionado ainda.</td></tr>
+                                    <tr><td colspan="6" style="text-align: center; color: #777;">Nenhum item adicionado ainda.</td></tr>
                                 </tbody>
                             </table>
-                            <div class="pedido-resumo">
-                                <span>Total do Pedido: <strong id="pedido-valor-total">R$ 0,00</strong></span>
-                                <button type="button" class="btn btn-primary" onclick="finalizarPedido()">Finalizar e Descontar Estoque</button>
+
+                            <!-- Condições Financeiras (Subtotal, Desconto, Frete, Total) -->
+                            <div class="form-row" style="margin-top: 16px; align-items: flex-end;">
+                                <div class="form-group flex-1">
+                                    <label for="pedido-desconto">Desconto (R$)</label>
+                                    <input type="number" id="pedido-desconto" min="0" step="0.01" value="0.00" oninput="calcularTotaisPedido()">
+                                </div>
+                                <div class="form-group flex-1">
+                                    <label for="pedido-frete">Frete (R$)</label>
+                                    <input type="number" id="pedido-frete" min="0" step="0.01" value="0.00" oninput="calcularTotaisPedido()">
+                                </div>
+                                <div class="form-group flex-2">
+                                    <div class="pedido-valores-totais">
+                                        <div>Subtotal: <span id="pedido-subtotal-display">R$ 0,00</span></div>
+                                        <div>Total Final: <strong id="pedido-valor-total" style="color: #0284c7; font-size: 1.3rem;">R$ 0,00</strong></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions" style="margin-top: 16px;">
+                                <button type="button" class="btn btn-primary" onclick="finalizarPedido()">Criar Pedido e Reservar Estoque</button>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Lista de Pedidos Realizados -->
+                <!-- 3. Barra de Pesquisa e Filtros Avançados -->
                 <div class="tabela-container">
-                    <h3>Histórico de Pedidos</h3>
+                    <div class="filtros-pedidos-box">
+                        <div class="form-row" style="margin-bottom: 8px;">
+                            <div class="form-group flex-2">
+                                <label for="filtro-ped-busca">Pesquisar</label>
+                                <input type="text" id="filtro-ped-busca" placeholder="Nº do pedido, cliente ou CPF..." onkeyup="sePressionarEnterFiltro(event)">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="filtro-ped-status">Status do Pedido</label>
+                                <select id="filtro-ped-status" onchange="aplicarFiltrosPedidos()">
+                                    <option value="">Todos os status</option>
+                                    <option value="Aguardando Pagamento">Aguardando Pagamento</option>
+                                    <option value="Confirmado">Confirmado</option>
+                                    <option value="Aguardando Separação">Aguardando Separação</option>
+                                    <option value="Em Separação">Em Separação</option>
+                                    <option value="Pronto para Envio">Pronto para Envio</option>
+                                    <option value="Enviado">Enviado</option>
+                                    <option value="Em Transporte">Em Transporte</option>
+                                    <option value="Entregue">Entregue</option>
+                                    <option value="Devolução Solicitada">Devolução Solicitada</option>
+                                    <option value="Devolvido">Devolvido</option>
+                                    <option value="Cancelado">Cancelado</option>
+                                    <option value="Recusado">Recusado</option>
+                                </select>
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="filtro-ped-status-pagamento">Status Pagamento</label>
+                                <select id="filtro-ped-status-pagamento" onchange="aplicarFiltrosPedidos()">
+                                    <option value="">Todos</option>
+                                    <option value="Pendente">Pendente</option>
+                                    <option value="Confirmado">Confirmado</option>
+                                    <option value="Recusado">Recusado</option>
+                                    <option value="Reembolsado">Reembolsado</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row" style="align-items: flex-end;">
+                            <div class="form-group flex-1">
+                                <label for="filtro-ped-data-inicio">Data Início</label>
+                                <input type="date" id="filtro-ped-data-inicio">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="filtro-ped-data-fim">Data Fim</label>
+                                <input type="date" id="filtro-ped-data-fim">
+                            </div>
+                            <div class="form-group flex-auto" style="display: flex; gap: 8px;">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="aplicarFiltrosPedidos()">🔍 Filtrar</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="limparFiltrosPedidos()">✕ Limpar</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Listagem de Pedidos -->
+                    <div class="tabela-header-actions" style="margin-top: 16px;">
+                        <h3 id="titulo-listagem-pedidos">Listagem de Pedidos</h3>
+                        <span id="filtro-ativo-badge" style="display: none; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600;"></span>
+                    </div>
+
                     <table class="tabela">
                         <thead>
                             <tr>
                                 <th>Nº Pedido</th>
-                                <th>Data/Hora</th>
+                                <th>Cliente</th>
+                                <th>Data</th>
                                 <th>Valor Total</th>
-                                <th>Status</th>
+                                <th>Status Pedido</th>
+                                <th>Pagamento</th>
+                                <th>Responsável</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody id="tabela-pedidos-corpo">
-                            <tr><td colspan="5" style="text-align:center;">Carregando pedidos...</td></tr>
+                            <tr><td colspan="8" style="text-align:center;">Carregando pedidos...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -411,55 +569,101 @@
             <section id="modulo-clientes" class="modulo">
                 <header class="section-header">
                     <h1>Módulo de Clientes</h1>
-                    <p>Cadastro e gerenciamento de clientes para vendas.</p>
+                    <p>Cadastro completo com CPF validado, endereço detalhado para entregas e histórico de pedidos associados.</p>
                 </header>
 
-                <!-- Formulário de Cliente -->
+                <!-- Formulário de Cliente (Cadastro / Edição) -->
                 <div class="painel-form">
-                    <h3>Cadastrar Novo Cliente</h3>
+                    <h3 id="form-cliente-titulo">Cadastrar Novo Cliente</h3>
+                    <p style="margin-bottom: 16px; color: #64748b; font-size: 0.9rem;">
+                        O CPF é validado pelos dígitos verificadores e deve ser único no sistema. O endereço é sugerido automaticamente na criação de pedidos.
+                    </p>
                     <form id="form-cliente" onsubmit="salvarCliente(event)">
+                        <input type="hidden" id="cli-id">
                         <div class="form-row">
                             <div class="form-group flex-2">
-                                <label for="cli-nome">Nome Completo</label>
+                                <label for="cli-nome">Nome Completo *</label>
                                 <input type="text" id="cli-nome" required placeholder="Ex: Maria Fernandes">
                             </div>
+                            <div class="form-group flex-1">
+                                <label for="cli-cpf">CPF (com validação) *</label>
+                                <input type="text" id="cli-cpf" required placeholder="000.000.000-00" maxlength="14" onblur="validarCampoCPFInterface(this)">
+                                <small id="cli-cpf-feedback" style="display:none; font-size:0.75rem; margin-top:2px;"></small>
+                            </div>
                             <div class="form-group flex-2">
-                                <label for="cli-email">E-mail</label>
+                                <label for="cli-email">E-mail *</label>
                                 <input type="email" id="cli-email" required placeholder="maria@email.com">
                             </div>
                         </div>
+
                         <div class="form-row">
                             <div class="form-group flex-1">
                                 <label for="cli-telefone">Telefone / WhatsApp</label>
                                 <input type="text" id="cli-telefone" placeholder="(11) 99999-9999">
                             </div>
                             <div class="form-group flex-1">
-                                <label for="cli-cidade">Cidade / UF</label>
-                                <input type="text" id="cli-cidade" placeholder="São Paulo / SP">
+                                <label for="cli-cep">CEP</label>
+                                <input type="text" id="cli-cep" placeholder="00000-000" maxlength="9">
+                            </div>
+                            <div class="form-group flex-2">
+                                <label for="cli-logradouro">Logradouro / Rua</label>
+                                <input type="text" id="cli-logradouro" placeholder="Ex: Av. Paulista, Rua das Flores...">
+                            </div>
+                            <div class="form-group flex-auto" style="width: 100px;">
+                                <label for="cli-numero">Número</label>
+                                <input type="text" id="cli-numero" placeholder="1000">
                             </div>
                         </div>
+
+                        <div class="form-row">
+                            <div class="form-group flex-1">
+                                <label for="cli-complemento">Complemento</label>
+                                <input type="text" id="cli-complemento" placeholder="Apto 42, Bloco B...">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="cli-bairro">Bairro</label>
+                                <input type="text" id="cli-bairro" placeholder="Bela Vista">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label for="cli-cidade">Cidade</label>
+                                <input type="text" id="cli-cidade" placeholder="São Paulo">
+                            </div>
+                            <div class="form-group flex-auto" style="width: 80px;">
+                                <label for="cli-uf">UF</label>
+                                <input type="text" id="cli-uf" placeholder="SP" maxlength="2" style="text-transform: uppercase;">
+                            </div>
+                        </div>
+
                         <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Cadastrar Cliente</button>
+                            <button type="submit" class="btn btn-primary" id="btn-salvar-cliente">Cadastrar Cliente</button>
+                            <button type="button" class="btn btn-secondary" id="btn-cancelar-edicao-cliente" onclick="cancelarEdicaoCliente()" style="display: none;">Cancelar</button>
                         </div>
                     </form>
                 </div>
 
-                <!-- Lista de Clientes -->
+                <!-- Lista de Clientes com Pesquisa -->
                 <div class="tabela-container">
-                    <h3>Clientes Cadastrados</h3>
+                    <div class="tabela-header-actions">
+                        <h3>Clientes Cadastrados</h3>
+                        <div class="busca-box">
+                            <input type="text" id="busca-cliente" placeholder="🔍 Pesquisar por nome, CPF ou e-mail..." oninput="filtrarClientesAoDigitar()">
+                        </div>
+                    </div>
                     <table class="tabela">
                         <thead>
                             <tr>
                                 <th>ID</th>
                                 <th>Nome</th>
+                                <th>CPF</th>
                                 <th>E-mail</th>
                                 <th>Telefone</th>
-                                <th>Cidade</th>
-                                <th>Data Cadastro</th>
+                                <th>Cidade/UF</th>
+                                <th>Pedidos</th>
+                                <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody id="tabela-clientes-corpo">
-                            <tr><td colspan="6" style="text-align:center;">Carregando clientes...</td></tr>
+                            <tr><td colspan="8" style="text-align:center;">Carregando clientes...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -536,6 +740,15 @@
             <span class="modal-close" onclick="fecharModal()">&times;</span>
             <h3 id="modal-titulo">Detalhes do Pedido</h3>
             <div id="modal-corpo"></div>
+        </div>
+    </div>
+
+    <!-- Modal de Detalhes do Cliente (com Pedidos Associados) -->
+    <div id="modal-detalhes-cliente" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 750px;">
+            <span class="modal-close" onclick="fecharModalCliente()">&times;</span>
+            <h3 id="modal-cliente-titulo">Detalhes do Cliente</h3>
+            <div id="modal-cliente-corpo"></div>
         </div>
     </div>
 

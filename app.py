@@ -568,9 +568,22 @@ def conferir_devolucao_pedido(pedido_id):
 @login_required
 @require_permission('clientes')
 def listar_clientes():
+    busca = request.args.get('busca')
     try:
-        clientes = cliente_service.listar_clientes()
+        clientes = cliente_service.listar_clientes(busca=busca)
         return jsonify(clientes)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+
+@app.route('/api/clientes/<int:cliente_id>', methods=['GET'])
+@login_required
+@require_permission('clientes')
+def obter_cliente(cliente_id):
+    try:
+        cliente = cliente_service.obter_cliente(cliente_id, incluir_pedidos=True)
+        if not cliente:
+            return jsonify({"erro": "Cliente não encontrado."}), 404
+        return jsonify(cliente)
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
 
@@ -581,16 +594,104 @@ def cadastrar_cliente():
     dados = request.get_json() or {}
     nome = dados.get('nome')
     email = dados.get('email')
+    cpf = dados.get('cpf')
     telefone = dados.get('telefone', '')
+    cep = dados.get('cep', '')
+    logradouro = dados.get('logradouro', '')
+    numero = dados.get('numero', '')
+    complemento = dados.get('complemento', '')
+    bairro = dados.get('bairro', '')
     cidade = dados.get('cidade', '')
+    uf = dados.get('uf', '')
+
+    # Se veio um campo legado 'endereco' e logradouro vazio
+    if not logradouro and dados.get('endereco'):
+        logradouro = dados.get('endereco')
 
     try:
-        resultado = cliente_service.cadastrar_cliente(nome, email, telefone, cidade)
+        resultado = cliente_service.cadastrar_cliente(
+            nome=nome,
+            email=email,
+            cpf=cpf,
+            telefone=telefone,
+            cep=cep,
+            logradouro=logradouro,
+            numero=numero,
+            complemento=complemento,
+            bairro=bairro,
+            cidade=cidade,
+            uf=uf
+        )
         return jsonify(resultado), 201
     except ValueError as ve:
         return jsonify({"erro": str(ve)}), 400
-    except pymysql.err.IntegrityError:
+    except pymysql.err.IntegrityError as ie:
+        msg = str(ie).lower()
+        if 'cpf' in msg:
+            return jsonify({"erro": "Já existe um cliente cadastrado com este CPF."}), 400
         return jsonify({"erro": "Já existe um cliente cadastrado com este e-mail."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/clientes/<int:cliente_id>', methods=['PUT', 'PATCH'])
+@login_required
+@require_permission('clientes')
+def atualizar_cliente(cliente_id):
+    dados = request.get_json() or {}
+    nome = dados.get('nome')
+    email = dados.get('email')
+    cpf = dados.get('cpf')
+    telefone = dados.get('telefone', '')
+    cep = dados.get('cep', '')
+    logradouro = dados.get('logradouro', '')
+    numero = dados.get('numero', '')
+    complemento = dados.get('complemento', '')
+    bairro = dados.get('bairro', '')
+    cidade = dados.get('cidade', '')
+    uf = dados.get('uf', '')
+
+    if not logradouro and dados.get('endereco'):
+        logradouro = dados.get('endereco')
+
+    try:
+        resultado = cliente_service.atualizar_cliente(
+            id=cliente_id,
+            nome=nome,
+            email=email,
+            cpf=cpf,
+            telefone=telefone,
+            cep=cep,
+            logradouro=logradouro,
+            numero=numero,
+            complemento=complemento,
+            bairro=bairro,
+            cidade=cidade,
+            uf=uf
+        )
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
+    except pymysql.err.IntegrityError as ie:
+        msg = str(ie).lower()
+        if 'cpf' in msg:
+            return jsonify({"erro": "Já existe outro cliente cadastrado com este CPF."}), 400
+        return jsonify({"erro": "Já existe outro cliente cadastrado com este e-mail."}), 400
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route('/api/clientes/<int:cliente_id>', methods=['DELETE'])
+@login_required
+@require_permission('clientes')
+def excluir_cliente(cliente_id):
+    try:
+        resultado = cliente_service.excluir_cliente(cliente_id)
+        return jsonify(resultado)
+    except KeyError as ke:
+        return jsonify({"erro": str(ke).strip("'")}), 404
+    except ValueError as ve:
+        return jsonify({"erro": str(ve)}), 400
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 

@@ -41,26 +41,58 @@ SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COL
 PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
 
 
--- 2. Tabela: clientes (com CPF e Endereço)
+-- 2. Tabela: clientes (com CPF único e Endereço detalhado)
 CREATE TABLE IF NOT EXISTS clientes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(150) NOT NULL,
-    cpf VARCHAR(20) DEFAULT NULL,
+    cpf VARCHAR(20) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     telefone VARCHAR(50),
+    cep VARCHAR(10) DEFAULT NULL,
+    logradouro VARCHAR(150) DEFAULT NULL,
+    numero VARCHAR(20) DEFAULT NULL,
+    complemento VARCHAR(100) DEFAULT NULL,
+    bairro VARCHAR(100) DEFAULT NULL,
     cidade VARCHAR(100),
+    uf VARCHAR(2) DEFAULT NULL,
     endereco VARCHAR(255) DEFAULT NULL,
-    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_clientes_cpf UNIQUE (cpf)
 );
 
--- Migrações idempotentes para tabela clientes (CPF e endereço)
+-- Migrações idempotentes para tabela clientes (CPF, campos de endereço e restrições)
 SET @tablename = "clientes";
+
 SET @columnname = "cpf";
 SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN cpf VARCHAR(20) DEFAULT NULL AFTER nome;"));
 PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
 
+SET @columnname = "cep";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN cep VARCHAR(10) DEFAULT NULL AFTER telefone;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
+SET @columnname = "logradouro";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN logradouro VARCHAR(150) DEFAULT NULL AFTER cep;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
+SET @columnname = "numero";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN numero VARCHAR(20) DEFAULT NULL AFTER logradouro;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
+SET @columnname = "complemento";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN complemento VARCHAR(100) DEFAULT NULL AFTER numero;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
+SET @columnname = "bairro";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN bairro VARCHAR(100) DEFAULT NULL AFTER complemento;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
+SET @columnname = "uf";
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN uf VARCHAR(2) DEFAULT NULL AFTER cidade;"));
+PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
+
 SET @columnname = "endereco";
-SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN endereco VARCHAR(255) DEFAULT NULL AFTER cidade;"));
+SET @preparedStatement = (SELECT IF((SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0, "SELECT 1", "ALTER TABLE clientes ADD COLUMN endereco VARCHAR(255) DEFAULT NULL AFTER uf;"));
 PREPARE alterCol FROM @preparedStatement; EXECUTE alterCol; DEALLOCATE PREPARE alterCol;
 
 

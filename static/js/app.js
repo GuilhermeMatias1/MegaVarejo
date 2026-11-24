@@ -1,9 +1,11 @@
 // Estado do ERP MegaVarejo S.A.
 let usuarioAtual = null;
 let produtosCache = [];
+let clientesCache = [];
 let itensNovoPedido = [];
 let perfisCache = [];
 let usuariosCache = [];
+let filtroAtivoIndicador = null;
 
 // Formatar moeda brasileira (BRL)
 function formatarMoeda(valor) {
@@ -137,7 +139,9 @@ function navegarPara(moduloId) {
     if (containerId === 'dashboard') carregarDashboard();
     if (containerId === 'produtos') carregarModuloEstoque();
     if (containerId === 'pedidos') {
+        carregarClientesParaPedido();
         carregarProdutosParaPedido();
+        carregarIndicadoresPedidos();
         carregarPedidos();
     }
     if (containerId === 'clientes') carregarClientes();
@@ -593,6 +597,40 @@ async function carregarRelatoriosEstoque() {
 // ==========================================
 // 3. MÓDULO PEDIDOS
 // ==========================================
+
+async function carregarClientesParaPedido() {
+    try {
+        const res = await fetch('/api/clientes');
+        if (!res.ok) return;
+        clientesCache = await res.json();
+
+        const select = document.getElementById('pedido-cliente-select');
+        if (!select) return;
+        select.innerHTML = '<option value="">-- Selecione o cliente --</option>';
+
+        clientesCache.forEach(cli => {
+            const opt = document.createElement('option');
+            opt.value = cli.id;
+            opt.textContent = `${cli.nome} (CPF: ${cli.cpf || 'Não informado'})`;
+            select.appendChild(opt);
+        });
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar lista de clientes para o pedido.', 'erro');
+    }
+}
+
+function aoSelecionarClientePedido() {
+    const select = document.getElementById('pedido-cliente-select');
+    const clienteId = parseInt(select.value, 10);
+    const campoEndereco = document.getElementById('pedido-endereco-entrega');
+    if (!clienteId || !campoEndereco) return;
+
+    const cliente = clientesCache.find(c => c.id === clienteId);
+    if (cliente && cliente.endereco && cliente.endereco !== '-') {
+        campoEndereco.value = cliente.endereco;
+    }
+}
+
 async function carregarProdutosParaPedido() {
     try {
         const res = await fetch('/api/produtos');
@@ -600,21 +638,27 @@ async function carregarProdutosParaPedido() {
         produtosCache = await res.json();
 
         const select = document.getElementById('pedido-produto-select');
+        if (!select) return;
         select.innerHTML = '<option value="">-- Selecione um produto --</option>';
 
         produtosCache.forEach(prod => {
             const opt = document.createElement('option');
             opt.value = prod.id;
-            opt.textContent = `${prod.nome} - ${formatarMoeda(prod.preco)} (Estoque: ${prod.estoque})`;
-            if (prod.estoque <= 0) {
+            const estoqueDisp = prod.estoque_disponivel !== undefined ? prod.estoque_disponivel : prod.estoque;
+            opt.textContent = `[${prod.codigo}] ${prod.nome} - ${formatarMoeda(prod.preco)} (Disponível: ${estoqueDisp})`;
+            if (estoqueDisp <= 0) {
                 opt.disabled = true;
-                opt.textContent += ' [Esgotado]';
+                opt.textContent += ' [Sem estoque livre]';
             }
             select.appendChild(opt);
         });
     } catch (err) {
         mostrarAlerta('Erro ao carregar lista de produtos para o pedido.', 'erro');
     }
+}
+
+function atualizarInfoDisponibilidadeProduto() {
+    // Pode atualizar algum helper visual se necessário
 }
 
 function adicionarItemAoPedido() {
@@ -636,11 +680,12 @@ function adicionarItemAoPedido() {
     const produto = produtosCache.find(p => p.id === produtoId);
     if (!produto) return;
 
+    const estoqueDisp = produto.estoque_disponivel !== undefined ? produto.estoque_disponivel : produto.estoque;
     const itemExistente = itensNovoPedido.find(i => i.produto_id === produtoId);
     const qtdTotalDesejada = (itemExistente ? itemExistente.quantidade : 0) + quantidade;
 
-    if (qtdTotalDesejada > produto.estoque) {
-        mostrarAlerta(`Estoque insuficiente! Disponível: ${produto.estoque}, Tentativa de adicionar: ${qtdTotalDesejada}.`, 'erro');
+    if (qtdTotalDesejada > estoqueDisp) {
+        mostrarAlerta(`Estoque disponível insuficiente para '${produto.nome}'! Livre: ${estoqueDisp}, Tentativa: ${qtdTotalDesejada}.`, 'erro');
         return;
     }
 
@@ -650,6 +695,7 @@ function adicionarItemAoPedido() {
     } else {
         itensNovoPedido.push({
             produto_id: produto.id,
+            codigo: produto.codigo,
             nome: produto.nome,
             preco_unitario: produto.preco,
             quantidade: quantidade,
@@ -666,31 +712,50 @@ function removerItemDoPedido(produtoId) {
     renderizarItensPedido();
 }
 
+function calcularTotaisPedido() {
+    const subtotal = itensNovoPedido.reduce((acc, item) => acc + item.subtotal, 0);
+    const descontoInput = document.getElementById('pedido-desconto');
+    const freteInput = document.getElementById('pedido-frete');
+
+    const desconto = Math.max(0, parseFloat(descontoInput ? descontoInput.value : 0) || 0);
+    const frete = Math.max(0, parseFloat(freteInput ? freteInput.value : 0) || 0);
+
+    const total = Math.max(0, subtotal - desconto + frete);
+
+    const subtotalElem = document.getElementById('pedido-subtotal-display');
+    const totalElem = document.getElementById('pedido-valor-total');
+
+    if (subtotalElem) subtotalElem.textContent = formatarMoeda(subtotal);
+    if (totalElem) totalElem.textContent = formatarMoeda(total);
+
+    return { subtotal, desconto, frete, total };
+}
+
 function renderizarItensPedido() {
     const tbody = document.getElementById('tabela-itens-pedido-corpo');
+    if (!tbody) return;
     tbody.innerHTML = '';
 
     if (itensNovoPedido.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #777;">Nenhum item adicionado ainda.</td></tr>';
-        document.getElementById('pedido-valor-total').textContent = formatarMoeda(0);
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #777;">Nenhum item adicionado ainda.</td></tr>';
+        calcularTotaisPedido();
         return;
     }
 
-    let total = 0;
     itensNovoPedido.forEach(item => {
-        total += item.subtotal;
         const tr = document.createElement('tr');
         tr.innerHTML = `
+            <td><strong>${item.codigo || '-'}</strong></td>
             <td>${item.nome}</td>
             <td>${formatarMoeda(item.preco_unitario)}</td>
             <td>${item.quantidade}</td>
             <td>${formatarMoeda(item.subtotal)}</td>
-            <td><button class="btn btn-danger btn-sm" onclick="removerItemDoPedido(${item.produto_id})">x</button></td>
+            <td><button type="button" class="btn btn-danger btn-sm" onclick="removerItemDoPedido(${item.produto_id})">✕</button></td>
         `;
         tbody.appendChild(tr);
     });
 
-    document.getElementById('pedido-valor-total').textContent = formatarMoeda(total);
+    calcularTotaisPedido();
 }
 
 async function finalizarPedido() {
@@ -699,7 +764,26 @@ async function finalizarPedido() {
         return;
     }
 
+    const clienteId = parseInt(document.getElementById('pedido-cliente-select').value, 10);
+    if (!clienteId) {
+        mostrarAlerta('Por favor, selecione o cliente para o pedido.', 'erro');
+        return;
+    }
+
+    const { desconto, frete } = calcularTotaisPedido();
+    const formaPagamento = document.getElementById('pedido-forma-pagamento').value;
+    const dataPrevista = document.getElementById('pedido-data-prevista').value || null;
+    const endereco = document.getElementById('pedido-endereco-entrega').value.trim();
+    const observacoes = document.getElementById('pedido-observacoes').value.trim();
+
     const payload = {
+        cliente_id: clienteId,
+        forma_pagamento: formaPagamento,
+        desconto: desconto,
+        frete: frete,
+        data_prevista_entrega: dataPrevista,
+        endereco_entrega: endereco,
+        observacoes: observacoes,
         itens: itensNovoPedido.map(i => ({
             produto_id: i.produto_id,
             quantidade: i.quantidade
@@ -719,51 +803,205 @@ async function finalizarPedido() {
             return;
         }
 
-        mostrarAlerta(`Pedido #${data.pedido_id} criado com sucesso! Estoque descontado.`);
+        mostrarAlerta(`Pedido ${data.numero_pedido || '#' + data.pedido_id} criado com sucesso! Itens reservados no estoque.`);
+        
+        // Limpar formulário de novo pedido
         itensNovoPedido = [];
         renderizarItensPedido();
+        document.getElementById('pedido-cliente-select').value = '';
+        document.getElementById('pedido-endereco-entrega').value = '';
+        document.getElementById('pedido-observacoes').value = '';
+        document.getElementById('pedido-data-prevista').value = '';
+        document.getElementById('pedido-desconto').value = '0.00';
+        document.getElementById('pedido-frete').value = '0.00';
+
+        // Atualizar listagem e indicadores
         carregarProdutosParaPedido();
+        carregarIndicadoresPedidos();
         carregarPedidos();
     } catch (err) {
         mostrarAlerta('Erro de conexão ao criar pedido.', 'erro');
     }
 }
 
-async function carregarPedidos() {
+// ----------------------------------------------------
+// Indicadores Operacionais Clicáveis
+// ----------------------------------------------------
+async function carregarIndicadoresPedidos() {
     try {
-        const res = await fetch('/api/pedidos');
+        const res = await fetch('/api/pedidos/indicadores');
+        if (!res.ok) return;
+        const ind = await res.json();
+
+        document.getElementById('kpi-pedidos-aguardando-pagamento').textContent = ind.aguardando_pagamento || 0;
+        document.getElementById('kpi-pedidos-aguardando-separacao').textContent = ind.aguardando_separacao || 0;
+        document.getElementById('kpi-pedidos-em-separacao').textContent = ind.em_separacao || 0;
+        document.getElementById('kpi-pedidos-prontos-envio').textContent = ind.prontos_para_envio || 0;
+        document.getElementById('kpi-pedidos-atrasados').textContent = ind.atrasados || 0;
+    } catch (err) {
+        console.error('Erro ao carregar indicadores de pedidos:', err);
+    }
+}
+
+function filtrarPorIndicador(statusFiltro) {
+    const kpiCards = document.querySelectorAll('.card-kpi-pedido');
+
+    // Se já estava ativo o mesmo filtro, desativa
+    if (filtroAtivoIndicador === statusFiltro) {
+        filtroAtivoIndicador = null;
+        kpiCards.forEach(c => c.classList.remove('ativo'));
+        document.getElementById('filtro-ped-status').value = '';
+        document.getElementById('filtro-ativo-badge').style.display = 'none';
+        carregarPedidos();
+        return;
+    }
+
+    filtroAtivoIndicador = statusFiltro;
+    kpiCards.forEach(c => c.classList.remove('ativo'));
+
+    // Destaca o card clicado
+    if (statusFiltro === 'Aguardando Pagamento') document.getElementById('kpi-card-aguardando_pagamento').classList.add('ativo');
+    if (statusFiltro === 'Aguardando Separação') document.getElementById('kpi-card-aguardando_separacao').classList.add('ativo');
+    if (statusFiltro === 'Em Separação') document.getElementById('kpi-card-em_separacao').classList.add('ativo');
+    if (statusFiltro === 'Pronto para Envio') document.getElementById('kpi-card-pronto_para_envio').classList.add('ativo');
+    if (statusFiltro === 'Atrasados') document.getElementById('kpi-card-atrasados').classList.add('ativo');
+
+    // Atualiza badge de filtro ativo
+    const badge = document.getElementById('filtro-ativo-badge');
+    badge.textContent = `Filtro ativo: ${statusFiltro}`;
+    badge.style.display = 'inline-block';
+
+    if (statusFiltro === 'Atrasados') {
+        document.getElementById('filtro-ped-status').value = '';
+        carregarPedidos({ apenas_atrasados: true });
+    } else {
+        document.getElementById('filtro-ped-status').value = statusFiltro;
+        carregarPedidos({ status_pedido: statusFiltro });
+    }
+}
+
+function sePressionarEnterFiltro(event) {
+    if (event.key === 'Enter') {
+        aplicarFiltrosPedidos();
+    }
+}
+
+function aplicarFiltrosPedidos() {
+    filtroAtivoIndicador = null;
+    document.querySelectorAll('.card-kpi-pedido').forEach(c => c.classList.remove('ativo'));
+    document.getElementById('filtro-ativo-badge').style.display = 'none';
+
+    const busca = document.getElementById('filtro-ped-busca').value.trim();
+    const statusPedido = document.getElementById('filtro-ped-status').value;
+    const statusPagamento = document.getElementById('filtro-ped-status-pagamento').value;
+    const dataInicio = document.getElementById('filtro-ped-data-inicio').value;
+    const dataFim = document.getElementById('filtro-ped-data-fim').value;
+
+    carregarPedidos({
+        busca: busca,
+        status_pedido: statusPedido,
+        status_pagamento: statusPagamento,
+        data_inicio: dataInicio,
+        data_fim: dataFim
+    });
+}
+
+function limparFiltrosPedidos() {
+    document.getElementById('filtro-ped-busca').value = '';
+    document.getElementById('filtro-ped-status').value = '';
+    document.getElementById('filtro-ped-status-pagamento').value = '';
+    document.getElementById('filtro-ped-data-inicio').value = '';
+    document.getElementById('filtro-ped-data-fim').value = '';
+    filtroAtivoIndicador = null;
+    document.querySelectorAll('.card-kpi-pedido').forEach(c => c.classList.remove('ativo'));
+    document.getElementById('filtro-ativo-badge').style.display = 'none';
+
+    carregarPedidos();
+}
+
+// ----------------------------------------------------
+// Listagem e Renderização de Pedidos
+// ----------------------------------------------------
+function obterClasseBadgeStatusPedido(status) {
+    switch (status) {
+        case 'Aguardando Pagamento': return 'badge-ped-aguardando-pagamento';
+        case 'Confirmado':           return 'badge-ped-confirmado';
+        case 'Aguardando Separação': return 'badge-ped-aguardando-separacao';
+        case 'Em Separação':         return 'badge-ped-em-separacao';
+        case 'Pronto para Envio':    return 'badge-ped-pronto-para-envio';
+        case 'Enviado':              return 'badge-ped-enviado';
+        case 'Em Transporte':        return 'badge-ped-em-transporte';
+        case 'Entregue':             return 'badge-ped-entregue';
+        case 'Cancelado':            return 'badge-ped-cancelado';
+        case 'Recusado':             return 'badge-ped-recusado';
+        case 'Devolução Solicitada': return 'badge-ped-devolucao-solicitada';
+        case 'Devolvido':            return 'badge-ped-devolvido';
+        default:                     return 'badge-ped-aguardando-separacao';
+    }
+}
+
+function obterClasseBadgeStatusPagamento(statusPagamento) {
+    switch (statusPagamento) {
+        case 'Confirmado':  return 'badge-pag-confirmado';
+        case 'Recusado':    return 'badge-pag-recusado';
+        case 'Reembolsado': return 'badge-pag-reembolsado';
+        case 'Pendente':
+        default:            return 'badge-pag-pendente';
+    }
+}
+
+async function carregarPedidos(filtros = {}) {
+    try {
+        const params = new URLSearchParams();
+        if (filtros.busca) params.append('busca', filtros.busca);
+        if (filtros.status_pedido) params.append('status_pedido', filtros.status_pedido);
+        if (filtros.status_pagamento) params.append('status_pagamento', filtros.status_pagamento);
+        if (filtros.data_inicio) params.append('data_inicio', filtros.data_inicio);
+        if (filtros.data_fim) params.append('data_fim', filtros.data_fim);
+        if (filtros.apenas_atrasados) params.append('apenas_atrasados', 'true');
+
+        const queryString = params.toString() ? `?${params.toString()}` : '';
+        const res = await fetch(`/api/pedidos${queryString}`);
+
         if (res.status === 401 || res.status === 403) {
             tratarErroAcesso(res);
             return;
         }
-        const pedidos = await res.json();
 
+        const pedidos = await res.json();
         const tbody = document.getElementById('tabela-pedidos-corpo');
         tbody.innerHTML = '';
 
-        if (pedidos.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Nenhum pedido realizado até o momento.</td></tr>';
+        if (!Array.isArray(pedidos) || pedidos.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #64748b;">Nenhum pedido encontrado para os filtros selecionados.</td></tr>';
             return;
         }
 
         pedidos.forEach(p => {
             const tr = document.createElement('tr');
-            const statusClass = p.status === 'Concluído' ? 'status-concluido' : (p.status === 'Cancelado' ? 'status-cancelado' : 'status-pendente');
+            if (p.esta_atrasado) {
+                tr.style.backgroundColor = '#fff1f2';
+            }
+
+            const badgeStatusPed = obterClasseBadgeStatusPedido(p.status);
+            const badgeStatusPag = obterClasseBadgeStatusPagamento(p.status_pagamento);
             const dataExibicao = formatarDataBR(p.data_formatada || p.data_pedido, true);
 
+            const avisoAtrasado = p.esta_atrasado ? '<span title="Pedido Atrasado" style="color: #dc2626; margin-left: 4px;">⏰</span>' : '';
+
             tr.innerHTML = `
-                <td><strong>#${p.id}</strong></td>
-                <td>${dataExibicao}</td>
-                <td><strong>${formatarMoeda(p.valor_total)}</strong></td>
+                <td><strong>${p.numero_pedido || '#' + p.id}</strong>${avisoAtrasado}</td>
                 <td>
-                    <select onchange="atualizarStatusPedido(${p.id}, this.value)" class="status-badge ${statusClass}">
-                        <option value="Pendente" ${p.status === 'Pendente' ? 'selected' : ''}>Pendente</option>
-                        <option value="Concluído" ${p.status === 'Concluído' ? 'selected' : ''}>Concluído</option>
-                        <option value="Cancelado" ${p.status === 'Cancelado' ? 'selected' : ''}>Cancelado</option>
-                    </select>
+                    <div><strong>${p.cliente_nome || 'Consumidor'}</strong></div>
+                    <small style="color: #64748b;">CPF: ${p.cliente_cpf || '-'}</small>
                 </td>
+                <td><small>${dataExibicao}</small></td>
+                <td><strong>${formatarMoeda(p.valor_total)}</strong></td>
+                <td><span class="badge-status-pedido ${badgeStatusPed}">${p.status}</span></td>
+                <td><span class="badge-status-pag ${badgeStatusPag}">${p.status_pagamento}</span></td>
+                <td><small>${p.responsavel || '-'}</small></td>
                 <td>
-                    <button class="btn btn-secondary btn-sm" onclick="verDetalhesPedido(${p.id})">Ver Itens</button>
+                    <button class="btn btn-secondary btn-sm" onclick="verDetalhesPedido(${p.id})">🔍 Detalhes</button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -773,27 +1011,9 @@ async function carregarPedidos() {
     }
 }
 
-async function atualizarStatusPedido(id, novoStatus) {
-    try {
-        const res = await fetch(`/api/pedidos/${id}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: novoStatus })
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-            mostrarAlerta(data.erro || 'Erro ao atualizar status.', 'erro');
-            return;
-        }
-
-        mostrarAlerta('Status do pedido atualizado!');
-        carregarPedidos();
-    } catch (err) {
-        mostrarAlerta('Erro ao comunicar com o servidor.', 'erro');
-    }
-}
-
+// ----------------------------------------------------
+// Modal de Detalhes Avançado, Auditoria e Ações por Perfil
+// ----------------------------------------------------
 async function verDetalhesPedido(id) {
     try {
         const res = await fetch(`/api/pedidos/${id}`);
@@ -804,15 +1024,37 @@ async function verDetalhesPedido(id) {
             return;
         }
 
-        document.getElementById('modal-titulo').textContent = `Itens do Pedido #${pedido.id}`;
-        const dataPedidoExibicao = formatarDataBR(pedido.data_formatada || pedido.data_pedido, true);
+        document.getElementById('modal-titulo').textContent = `Pedido ${pedido.numero_pedido || '#' + pedido.id}`;
+
+        const dataExibicao = formatarDataBR(pedido.data_formatada || pedido.data_pedido, true);
+        const dataPrevistaStr = pedido.data_prevista_entrega ? formatarDataBR(pedido.data_prevista_entrega, false) : 'Não informada';
+        const badgePed = obterClasseBadgeStatusPedido(pedido.status);
+        const badgePag = obterClasseBadgeStatusPagamento(pedido.status_pagamento);
+
         let html = `
-            <p style="margin-bottom: 12px; color: #475569;">
-                <strong>Data:</strong> ${dataPedidoExibicao} | 
-                <strong>Status:</strong> ${pedido.status} | 
-                <strong>Total:</strong> ${formatarMoeda(pedido.valor_total)}
-            </p>
-            <table class="tabela compact">
+            <div class="modal-detalhes-grid">
+                <div>
+                    <div class="modal-section-title">Dados Gerais e Cliente</div>
+                    <p><strong>Cliente:</strong> ${pedido.cliente_nome}</p>
+                    <p><strong>CPF:</strong> ${pedido.cliente_cpf}</p>
+                    <p><strong>Data do Pedido:</strong> ${dataExibicao}</p>
+                    <p><strong>Previsão de Entrega:</strong> ${dataPrevistaStr}</p>
+                    <p><strong>Endereço de Entrega:</strong> ${pedido.endereco_entrega || '-'}</p>
+                    <p><strong>Vendedor / Responsável:</strong> ${pedido.responsavel}</p>
+                </div>
+                <div>
+                    <div class="modal-section-title">Situação e Pagamento</div>
+                    <p><strong>Status do Pedido:</strong> <span class="badge-status-pedido ${badgePed}">${pedido.status}</span></p>
+                    <p><strong>Status do Pagamento:</strong> <span class="badge-status-pag ${badgePag}">${pedido.status_pagamento}</span></p>
+                    <p><strong>Forma de Pagamento:</strong> ${pedido.forma_pagamento}</p>
+                    <p><strong>Subtotal:</strong> ${formatarMoeda(pedido.valor_subtotal)}</p>
+                    <p><strong>Desconto:</strong> -${formatarMoeda(pedido.desconto)} | <strong>Frete:</strong> +${formatarMoeda(pedido.frete)}</p>
+                    <p><strong>Valor Total Líquido:</strong> <strong style="color: #0284c7; font-size: 1.1rem;">${formatarMoeda(pedido.valor_total)}</strong></p>
+                </div>
+            </div>
+
+            <div class="modal-section-title">Itens do Pedido</div>
+            <table class="tabela compact" style="margin-bottom: 20px;">
                 <thead>
                     <tr>
                         <th>Produto</th>
@@ -830,16 +1072,236 @@ async function verDetalhesPedido(id) {
                     <td>${item.produto_nome}</td>
                     <td>${formatarMoeda(item.preco_unitario)}</td>
                     <td>${item.quantidade}</td>
-                    <td>${formatarMoeda(item.subtotal)}</td>
+                    <td><strong>${formatarMoeda(item.subtotal)}</strong></td>
                 </tr>
             `;
         });
 
-        html += '</tbody></table>';
+        html += `
+                </tbody>
+            </table>
+        `;
+
+        // Histórico de Alterações / Auditoria
+        html += `
+            <div class="modal-section-title">Histórico de Alterações (Auditoria)</div>
+            <div class="timeline-historico">
+        `;
+
+        if (pedido.historico && pedido.historico.length > 0) {
+            pedido.historico.forEach(h => {
+                const dataHist = formatarDataBR(h.data_registro_formatada || h.data_registro, true);
+                html += `
+                    <div class="timeline-item">
+                        <div><strong>${h.tipo_alteracao || 'Mudança'}:</strong> ${h.status_anterior || '-'} &rarr; <strong>${h.status_novo}</strong></div>
+                        <div class="timeline-meta">Por: <em>${h.responsavel}</em> em ${dataHist}</div>
+                        ${h.observacao ? `<div style="font-size: 0.8rem; color: #475569; margin-top: 2px;">Obs: ${h.observacao}</div>` : ''}
+                    </div>
+                `;
+            });
+        } else {
+            html += `<p style="font-size: 0.85rem; color: #64748b;">Nenhuma alteração registrada até o momento.</p>`;
+        }
+
+        html += `</div>`;
+
+        // Ações Permitidas com base no RBAC e no Status
+        html += renderizarAcoesModalPedido(pedido);
+
         document.getElementById('modal-corpo').innerHTML = html;
         document.getElementById('modal-detalhes').style.display = 'flex';
     } catch (err) {
-        mostrarAlerta('Erro ao buscar detalhes do pedido.', 'erro');
+        mostrarAlerta('Erro ao carregar detalhes do pedido.', 'erro');
+    }
+}
+
+function renderizarAcoesModalPedido(pedido) {
+    const perfil = usuarioAtual ? usuarioAtual.perfil : '';
+    let botoes = '';
+
+    // 1. Confirmação de Pagamento (Financeiro, Gerência, Administrador)
+    if (['Financeiro', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (pedido.status_pagamento === 'Pendente' && !['Cancelado', 'Devolvido', 'Recusado'].includes(pedido.status)) {
+            botoes += `<button type="button" class="btn btn-primary btn-sm" onclick="executarConfirmarPagamento(${pedido.id})">💰 Confirmar Pagamento</button>`;
+        }
+    }
+
+    // 2. Mudança de Status do Pedido conforme a máquina de estados e o perfil
+    // Estoque: Em Separação, Pronto para Envio, Enviado
+    if (['Estoque', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (['Confirmado', 'Aguardando Separação'].includes(pedido.status)) {
+            botoes += `<button type="button" class="btn btn-secondary btn-sm" onclick="executarAvancoStatus(${pedido.id}, 'Em Separação')">📦 Iniciar Separação</button>`;
+        }
+        if (pedido.status === 'Em Separação') {
+            botoes += `<button type="button" class="btn btn-secondary btn-sm" onclick="executarAvancoStatus(${pedido.id}, 'Pronto para Envio')">🚚 Pronto para Envio</button>`;
+        }
+        if (pedido.status === 'Pronto para Envio') {
+            botoes += `<button type="button" class="btn btn-secondary btn-sm" onclick="executarAvancoStatus(${pedido.id}, 'Enviado')">✈️ Despachar / Enviado</button>`;
+        }
+    }
+
+    // Vendas/Gerência/Admin: Em Transporte -> Entregue
+    if (['Vendas', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (pedido.status === 'Enviado') {
+            botoes += `<button type="button" class="btn btn-secondary btn-sm" onclick="executarAvancoStatus(${pedido.id}, 'Em Transporte')">🚛 Em Transporte</button>`;
+        }
+        if (['Enviado', 'Em Transporte'].includes(pedido.status)) {
+            botoes += `<button type="button" class="btn btn-primary btn-sm" onclick="executarAvancoStatus(${pedido.id}, 'Entregue')">✅ Confirmar Entrega</button>`;
+        }
+    }
+
+    // 3. Cancelamento (Vendas, Gerência, Admin - apenas antes do envio)
+    if (['Vendas', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (!['Enviado', 'Em Transporte', 'Entregue', 'Cancelado', 'Devolvido', 'Devolução Solicitada', 'Recusado'].includes(pedido.status)) {
+            botoes += `<button type="button" class="btn btn-danger btn-sm" onclick="abrirPromptCancelarPedido(${pedido.id})">✕ Cancelar Pedido</button>`;
+        }
+    }
+
+    // 4. Solicitação de Devolução (Vendas, Gerência, Admin - apenas se Enviado/Em Transporte/Entregue)
+    if (['Vendas', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (['Enviado', 'Em Transporte', 'Entregue'].includes(pedido.status)) {
+            botoes += `<button type="button" class="btn btn-secondary btn-sm" onclick="abrirPromptDevolucaoPedido(${pedido.id})">↩️ Solicitar Devolução</button>`;
+        }
+    }
+
+    // 5. Conferência Física de Devolução (Estoque, Gerência, Admin)
+    if (['Estoque', 'Gerência', 'Administrador'].includes(perfil)) {
+        if (pedido.status === 'Devolução Solicitada') {
+            botoes += `<button type="button" class="btn btn-primary btn-sm" onclick="abrirPromptConferirDevolucao(${pedido.id})">🔍 Conferir e Retornar ao Estoque</button>`;
+        }
+    }
+
+    if (!botoes) return '';
+
+    return `
+        <div class="modal-acoes-box">
+            <span style="font-size: 0.85rem; font-weight: 600; color: #475569; width: 100%;">Ações Disponíveis:</span>
+            ${botoes}
+        </div>
+    `;
+}
+
+// ----------------------------------------------------
+// Handlers de Ações em Pedidos
+// ----------------------------------------------------
+async function executarConfirmarPagamento(pedidoId) {
+    if (!confirm('Deseja confirmar o pagamento deste pedido no Financeiro?')) return;
+    try {
+        const res = await fetch(`/api/pedidos/${pedidoId}/pagamento`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status_pagamento: 'Confirmado' })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao confirmar pagamento.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Pagamento confirmado!');
+        fecharModal();
+        carregarIndicadoresPedidos();
+        carregarPedidos();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao confirmar pagamento.', 'erro');
+    }
+}
+
+async function executarAvancoStatus(pedidoId, novoStatus) {
+    if (!confirm(`Deseja alterar o status do pedido para "${novoStatus}"?`)) return;
+    try {
+        const res = await fetch(`/api/pedidos/${pedidoId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: novoStatus })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao atualizar status.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Status atualizado com sucesso!');
+        fecharModal();
+        carregarIndicadoresPedidos();
+        carregarPedidos();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao atualizar status.', 'erro');
+    }
+}
+
+async function abrirPromptCancelarPedido(pedidoId) {
+    const motivo = prompt('Informe o motivo do cancelamento do pedido:');
+    if (!motivo || !motivo.trim()) return;
+
+    try {
+        const res = await fetch(`/api/pedidos/${pedidoId}/cancelar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ motivo: motivo.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao cancelar pedido.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Pedido cancelado e reservas liberadas!');
+        fecharModal();
+        carregarIndicadoresPedidos();
+        carregarPedidos();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao cancelar pedido.', 'erro');
+    }
+}
+
+async function abrirPromptDevolucaoPedido(pedidoId) {
+    const motivo = prompt('Informe o motivo da solicitação de devolução:');
+    if (!motivo || !motivo.trim()) return;
+
+    try {
+        const res = await fetch(`/api/pedidos/${pedidoId}/devolucao`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ motivo: motivo.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao solicitar devolução.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Devolução solicitada com sucesso!');
+        fecharModal();
+        carregarIndicadoresPedidos();
+        carregarPedidos();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao solicitar devolução.', 'erro');
+    }
+}
+
+async function abrirPromptConferirDevolucao(pedidoId) {
+    const condicao = prompt('Informe a condição física dos produtos recebidos:', 'Mercadorias conferidas em perfeito estado.');
+    if (condicao === null) return;
+
+    const retornarAoEstoque = confirm('Deseja reincorporar os produtos ao estoque disponível?\n[OK = Sim / Cancelar = Não]');
+
+    try {
+        const res = await fetch(`/api/pedidos/${pedidoId}/conferir-devolucao`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                condicao_itens: condicao.trim(),
+                retornar_ao_estoque: retornarAoEstoque
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao conferir devolução.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Devolução conferida!');
+        fecharModal();
+        carregarIndicadoresPedidos();
+        carregarPedidos();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao conferir devolução.', 'erro');
     }
 }
 
@@ -850,9 +1312,71 @@ function fecharModal() {
 // ==========================================
 // 4. MÓDULO CLIENTES
 // ==========================================
-async function carregarClientes() {
+
+// Validação visual de CPF no frontend
+function validarDigitosCPFJS(cpf) {
+    if (!cpf) return false;
+    const d = String(cpf).replace(/\D/g, '');
+    if (d.length !== 11 || d === d[0].repeat(11)) return false;
+
+    let soma = 0;
+    for (let i = 0; i < 9; i++) soma += parseInt(d.charAt(i)) * (10 - i);
+    let resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(d.charAt(9))) return false;
+
+    soma = 0;
+    for (let i = 0; i < 10; i++) soma += parseInt(d.charAt(i)) * (11 - i);
+    resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(d.charAt(10))) return false;
+
+    return true;
+}
+
+function formatarCPFInput(v) {
+    v = v.replace(/\D/g, '');
+    if (v.length > 11) v = v.substring(0, 11);
+    if (v.length > 9) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+    if (v.length > 6) return v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+    if (v.length > 3) return v.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+    return v;
+}
+
+function validarCampoCPFInterface(input) {
+    input.value = formatarCPFInput(input.value);
+    const feedback = document.getElementById('cli-cpf-feedback');
+    if (!feedback) return;
+
+    if (!input.value.trim()) {
+        feedback.style.display = 'none';
+        return;
+    }
+
+    if (validarDigitosCPFJS(input.value)) {
+        feedback.textContent = '✓ CPF válido';
+        feedback.style.color = '#15803d';
+        feedback.style.display = 'block';
+    } else {
+        feedback.textContent = '✗ CPF inválido (dígitos incorretos)';
+        feedback.style.color = '#dc2626';
+        feedback.style.display = 'block';
+    }
+}
+
+let timeoutBuscaClientes = null;
+function filtrarClientesAoDigitar() {
+    clearTimeout(timeoutBuscaClientes);
+    timeoutBuscaClientes = setTimeout(() => {
+        const termo = document.getElementById('busca-cliente').value.trim();
+        carregarClientes(termo);
+    }, 300);
+}
+
+async function carregarClientes(busca = '') {
     try {
-        const res = await fetch('/api/clientes');
+        const url = busca ? `/api/clientes?busca=${encodeURIComponent(busca)}` : '/api/clientes';
+        const res = await fetch(url);
         if (res.status === 401 || res.status === 403) {
             tratarErroAcesso(res);
             return;
@@ -861,20 +1385,31 @@ async function carregarClientes() {
         const tbody = document.getElementById('tabela-clientes-corpo');
         tbody.innerHTML = '';
 
-        if (clientes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Nenhum cliente cadastrado.</td></tr>';
+        if (!Array.isArray(clientes) || clientes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #64748b;">Nenhum cliente encontrado.</td></tr>';
             return;
         }
 
         clientes.forEach(cli => {
             const tr = document.createElement('tr');
+            const totalPed = cli.total_pedidos || 0;
+            const badgePed = totalPed > 0 
+                ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 0.8rem;">${totalPed} pedido(s)</span>`
+                : `<span style="color: #94a3b8; font-size: 0.8rem;">0</span>`;
+
             tr.innerHTML = `
                 <td>#${cli.id}</td>
                 <td><strong>${cli.nome}</strong></td>
+                <td><code>${cli.cpf_formatado || cli.cpf || '-'}</code></td>
                 <td>${cli.email}</td>
                 <td>${cli.telefone || '-'}</td>
-                <td>${cli.cidade || '-'}</td>
-                <td>${formatarDataBR(cli.criado_em, false)}</td>
+                <td>${cli.cidade || '-'}${cli.uf && cli.uf !== '-' ? ' / ' + cli.uf : ''}</td>
+                <td>${badgePed}</td>
+                <td>
+                    <button class="btn btn-secondary btn-sm" onclick="verDetalhesCliente(${cli.id})" title="Ver detalhes e pedidos">👁️ Ver</button>
+                    <button class="btn btn-primary btn-sm" onclick="iniciarEdicaoCliente(${cli.id})" title="Editar dados">✏️ Editar</button>
+                    <button class="btn btn-danger btn-sm" onclick="excluirCliente(${cli.id}, '${cli.nome}', ${totalPed})" title="Excluir cliente">🗑️</button>
+                </td>
             `;
             tbody.appendChild(tr);
         });
@@ -885,30 +1420,202 @@ async function carregarClientes() {
 
 async function salvarCliente(event) {
     event.preventDefault();
+
+    const id = document.getElementById('cli-id').value;
     const nome = document.getElementById('cli-nome').value.trim();
+    const cpf = document.getElementById('cli-cpf').value.trim();
     const email = document.getElementById('cli-email').value.trim();
     const telefone = document.getElementById('cli-telefone').value.trim();
+    const cep = document.getElementById('cli-cep').value.trim();
+    const logradouro = document.getElementById('cli-logradouro').value.trim();
+    const numero = document.getElementById('cli-numero').value.trim();
+    const complemento = document.getElementById('cli-complemento').value.trim();
+    const bairro = document.getElementById('cli-bairro').value.trim();
     const cidade = document.getElementById('cli-cidade').value.trim();
+    const uf = document.getElementById('cli-uf').value.trim().toUpperCase();
+
+    // Validação preventiva no frontend
+    if (!validarDigitosCPFJS(cpf)) {
+        mostrarAlerta('O CPF informado possui dígitos verificadores inválidos.', 'erro');
+        return;
+    }
+
+    const payload = {
+        nome, cpf, email, telefone,
+        cep, logradouro, numero, complemento,
+        bairro, cidade, uf
+    };
 
     try {
-        const res = await fetch('/api/clientes', {
-            method: 'POST',
+        const url = id ? `/api/clientes/${id}` : '/api/clientes';
+        const method = id ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+            method: method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, email, telefone, cidade })
+            body: JSON.stringify(payload)
         });
         const data = await res.json();
 
         if (!res.ok) {
-            mostrarAlerta(data.erro || 'Erro ao cadastrar cliente.', 'erro');
+            mostrarAlerta(data.erro || 'Erro ao salvar cliente.', 'erro');
             return;
         }
 
-        mostrarAlerta('Cliente cadastrado com sucesso!');
-        document.getElementById('form-cliente').reset();
+        mostrarAlerta(data.mensagem || (id ? 'Cliente atualizado!' : 'Cliente cadastrado!'));
+        cancelarEdicaoCliente();
         carregarClientes();
+        // Atualiza cache de clientes se estiver no modal de pedidos
+        carregarClientesParaPedido();
     } catch (err) {
         mostrarAlerta('Erro de conexão ao salvar cliente.', 'erro');
     }
+}
+
+async function iniciarEdicaoCliente(id) {
+    try {
+        const res = await fetch(`/api/clientes/${id}`);
+        if (!res.ok) {
+            mostrarAlerta('Erro ao carregar dados do cliente.', 'erro');
+            return;
+        }
+        const cli = await res.json();
+
+        document.getElementById('cli-id').value = cli.id;
+        document.getElementById('cli-nome').value = cli.nome;
+        document.getElementById('cli-cpf').value = cli.cpf_formatado || cli.cpf;
+        document.getElementById('cli-email').value = cli.email;
+        document.getElementById('cli-telefone').value = cli.telefone !== '-' ? cli.telefone : '';
+        document.getElementById('cli-cep').value = cli.cep !== '-' ? cli.cep : '';
+        document.getElementById('cli-logradouro').value = cli.logradouro !== '-' ? cli.logradouro : '';
+        document.getElementById('cli-numero').value = cli.numero !== '-' ? cli.numero : '';
+        document.getElementById('cli-complemento').value = cli.complemento || '';
+        document.getElementById('cli-bairro').value = cli.bairro !== '-' ? cli.bairro : '';
+        document.getElementById('cli-cidade').value = cli.cidade !== '-' ? cli.cidade : '';
+        document.getElementById('cli-uf').value = cli.uf !== '-' ? cli.uf : '';
+
+        document.getElementById('form-cliente-titulo').textContent = `Editar Cliente #${cli.id}`;
+        document.getElementById('btn-salvar-cliente').textContent = 'Atualizar Cliente';
+        document.getElementById('btn-cancelar-edicao-cliente').style.display = 'inline-block';
+
+        validarCampoCPFInterface(document.getElementById('cli-cpf'));
+        window.scrollTo({ top: document.getElementById('modulo-clientes').offsetTop, behavior: 'smooth' });
+    } catch (err) {
+        mostrarAlerta('Erro ao preparar edição do cliente.', 'erro');
+    }
+}
+
+function cancelarEdicaoCliente() {
+    document.getElementById('cli-id').value = '';
+    document.getElementById('form-cliente').reset();
+    document.getElementById('form-cliente-titulo').textContent = 'Cadastrar Novo Cliente';
+    document.getElementById('btn-salvar-cliente').textContent = 'Cadastrar Cliente';
+    document.getElementById('btn-cancelar-edicao-cliente').style.display = 'none';
+    const feedback = document.getElementById('cli-cpf-feedback');
+    if (feedback) feedback.style.display = 'none';
+}
+
+async function excluirCliente(id, nome, totalPedidos) {
+    if (totalPedidos > 0) {
+        alert(`Não é permitido excluir o cliente "${nome}" pois ele possui ${totalPedidos} pedido(s) associado(s).\n\nPara integridade dos dados fiscais e operacionais, clientes com pedidos históricos não podem ser removidos.`);
+        return;
+    }
+
+    if (!confirm(`Deseja realmente excluir o cadastro do cliente "${nome}"?`)) return;
+
+    try {
+        const res = await fetch(`/api/clientes/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(data.erro || 'Erro ao excluir cliente.', 'erro');
+            return;
+        }
+        mostrarAlerta(data.mensagem || 'Cliente excluído com sucesso!');
+        carregarClientes();
+        carregarClientesParaPedido();
+    } catch (err) {
+        mostrarAlerta('Erro de conexão ao excluir cliente.', 'erro');
+    }
+}
+
+async function verDetalhesCliente(id) {
+    try {
+        const res = await fetch(`/api/clientes/${id}`);
+        const cli = await res.json();
+        if (!res.ok) {
+            mostrarAlerta(cli.erro || 'Erro ao obter dados do cliente.', 'erro');
+            return;
+        }
+
+        document.getElementById('modal-cliente-titulo').textContent = `Cliente: ${cli.nome}`;
+
+        let html = `
+            <div class="modal-detalhes-grid" style="margin-bottom: 16px;">
+                <div>
+                    <div class="modal-section-title">Dados Pessoais</div>
+                    <p><strong>Nome:</strong> ${cli.nome}</p>
+                    <p><strong>CPF:</strong> <code>${cli.cpf_formatado || cli.cpf}</code></p>
+                    <p><strong>E-mail:</strong> ${cli.email}</p>
+                    <p><strong>Telefone:</strong> ${cli.telefone || '-'}</p>
+                    <p><strong>Data de Cadastro:</strong> ${cli.criado_em}</p>
+                </div>
+                <div>
+                    <div class="modal-section-title">Endereço Principal de Entrega</div>
+                    <p><strong>CEP:</strong> ${cli.cep || '-'}</p>
+                    <p><strong>Logradouro:</strong> ${cli.logradouro || '-'}, Nº ${cli.numero || 'S/N'}</p>
+                    <p><strong>Complemento:</strong> ${cli.complemento || '-'}</p>
+                    <p><strong>Bairro:</strong> ${cli.bairro || '-'}</p>
+                    <p><strong>Cidade / UF:</strong> ${cli.cidade || '-'}${cli.uf ? ' / ' + cli.uf : ''}</p>
+                    <p><strong>Endereço Formatado:</strong> <em style="color: #475569;">${cli.endereco_completo || cli.endereco || '-'}</em></p>
+                </div>
+            </div>
+
+            <div class="modal-section-title">Histórico de Pedidos Realizados (${cli.total_pedidos || 0})</div>
+        `;
+
+        if (cli.pedidos && cli.pedidos.length > 0) {
+            html += `
+                <table class="tabela compact">
+                    <thead>
+                        <tr>
+                            <th>Nº Pedido</th>
+                            <th>Data</th>
+                            <th>Status Pedido</th>
+                            <th>Status Pagamento</th>
+                            <th>Total</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            cli.pedidos.forEach(p => {
+                html += `
+                    <tr>
+                        <td><strong>${p.numero_pedido || '#' + p.id}</strong></td>
+                        <td>${p.data_formatada || p.data_pedido}</td>
+                        <td><span class="badge-status-pedido ${obterClasseBadgeStatusPedido(p.status)}">${p.status}</span></td>
+                        <td><span class="badge-status-pag ${obterClasseBadgeStatusPagamento(p.status_pagamento)}">${p.status_pagamento}</span></td>
+                        <td><strong>${formatarMoeda(p.valor_total)}</strong></td>
+                        <td>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="fecharModalCliente(); verDetalhesPedido(${p.id});">Visualizar Pedido</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            html += `</tbody></table>`;
+        } else {
+            html += `<p style="color: #64748b; font-size: 0.9rem; padding: 10px 0;">Este cliente ainda não realizou nenhum pedido.</p>`;
+        }
+
+        document.getElementById('modal-cliente-corpo').innerHTML = html;
+        document.getElementById('modal-detalhes-cliente').style.display = 'flex';
+    } catch (err) {
+        mostrarAlerta('Erro ao carregar detalhes do cliente.', 'erro');
+    }
+}
+
+function fecharModalCliente() {
+    document.getElementById('modal-detalhes-cliente').style.display = 'none';
 }
 
 // ==========================================

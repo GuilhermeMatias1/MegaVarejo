@@ -528,6 +528,163 @@ body {
     font-size: 1.1rem;
 }
 
+.pedido-valores-totais {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 10px 16px;
+    border-radius: 6px;
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Indicadores operacionais da aba Pedidos */
+.pedidos-kpis .card-kpi-pedido {
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    border: 2px solid transparent;
+}
+
+.pedidos-kpis .card-kpi-pedido:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.1);
+}
+
+.pedidos-kpis .card-kpi-pedido.ativo {
+    border-color: #0284c7;
+    background-color: #f0f9ff;
+}
+
+.pedidos-kpis .card-kpi-alerta {
+    border-left: 4px solid #ef4444;
+}
+
+.pedidos-kpis .card-kpi-alerta.ativo {
+    border-color: #ef4444;
+    background-color: #fef2f2;
+}
+
+/* Barra de filtros de Pedidos */
+.filtros-pedidos-box {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.filtros-pedidos-box label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 4px;
+}
+
+.filtros-pedidos-box input,
+.filtros-pedidos-box select {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    outline: none;
+    background: #fff;
+    width: 100%;
+}
+
+.filtros-pedidos-box input:focus,
+.filtros-pedidos-box select:focus {
+    border-color: #0284c7;
+}
+
+/* Badges de Status do Pedido */
+.badge-status-pedido {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-ped-aguardando-pagamento { background: #fef3c7; color: #92400e; }
+.badge-ped-confirmado           { background: #e0f2fe; color: #0369a1; }
+.badge-ped-aguardando-separacao { background: #f1f5f9; color: #334155; }
+.badge-ped-em-separacao         { background: #ede9fe; color: #5b21b6; }
+.badge-ped-pronto-para-envio    { background: #dbeafe; color: #1e40af; }
+.badge-ped-enviado              { background: #e0e7ff; color: #3730a3; }
+.badge-ped-em-transporte        { background: #cffafe; color: #155e75; }
+.badge-ped-entregue             { background: #dcfce7; color: #166534; }
+.badge-ped-cancelado            { background: #fee2e2; color: #991b1b; }
+.badge-ped-recusado             { background: #fecdd3; color: #9f1239; }
+.badge-ped-devolucao-solicitada { background: #ffedd5; color: #9a3412; }
+.badge-ped-devolvido            { background: #f3e8ff; color: #6b21a8; }
+
+/* Badges de Status de Pagamento */
+.badge-status-pag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.badge-pag-pendente    { background: #fef3c7; color: #92400e; }
+.badge-pag-confirmado  { background: #dcfce7; color: #15803d; }
+.badge-pag-recusado    { background: #fee2e2; color: #b91c1c; }
+.badge-pag-reembolsado { background: #e2e8f0; color: #475569; }
+
+/* Detalhes Modal Avançado */
+.modal-detalhes-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+    background: #f8fafc;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+
+.modal-section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+}
+
+.timeline-historico {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+
+.timeline-item {
+    border-left: 3px solid #0284c7;
+    padding-left: 10px;
+    font-size: 0.85rem;
+}
+
+.timeline-meta {
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.modal-acoes-box {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e2e8f0;
+}
+
 /* Modal */
 .modal {
     position: fixed;
