@@ -44,6 +44,14 @@ function formatarDataBR(valor, incluirHora = true) {
     return `${dia}/${mes}/${ano} ${horas}:${minutos}`;
 }
 
+/**
+ * Retorna a classe CSS adequada para o badge de status do pedido.
+ * Utilizada no Dashboard Gerencial e nas listagens de pedidos.
+ */
+function obterClasseBadge(status) {
+    return obterClasseBadgeStatusPedido(status);
+}
+
 // Exibir alertas amigáveis na interface
 function mostrarAlerta(mensagem, tipo = 'sucesso') {
     const alerta = document.getElementById('alerta');
@@ -473,7 +481,7 @@ function renderizarTabelaPedidosRecentes(pedidos) {
             <td>${p.cliente}</td>
             <td>${p.data}</td>
             <td><strong>${formatarMoeda(p.valor)}</strong></td>
-            <td><span class="badge ${obterClasseBadge(p.status)}">${p.status}</span></td>
+            <td><span class="badge-status-pedido ${obterClasseBadge(p.status)}">${p.status}</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -518,7 +526,7 @@ function renderizarTabelaEntregas(entregas) {
             <td><strong>${e.numero_pedido}</strong></td>
             <td>${e.cliente}<br><small style="color: #64748b;">${e.destino}</small></td>
             <td>${e.previsao_entrega} ${alertaAtraso}</td>
-            <td><span class="badge ${obterClasseBadge(e.status)}">${e.status}</span></td>
+            <td><span class="badge-status-pedido ${obterClasseBadge(e.status)}">${e.status}</span></td>
         `;
         tbody.appendChild(tr);
     });
@@ -1782,6 +1790,21 @@ async function carregarClientes(busca = '') {
                 ? `<span style="background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 0.8rem;">${totalPed} pedido(s)</span>`
                 : `<span style="color: #94a3b8; font-size: 0.8rem;">0</span>`;
 
+            // Permissões de ação em clientes:
+            // - Visualizar: todos com acesso à aba Clientes (Admin, Gerência, Vendas)
+            // - Editar: apenas Administrador (Vendas pode cadastrar/consultar; Gerência apenas consulta)
+            // - Excluir: apenas Administrador
+            const podeEditar = usuarioAtual && usuarioAtual.perfil === 'Administrador';
+            const podeExcluir = usuarioAtual && usuarioAtual.perfil === 'Administrador';
+
+            let acaoBotoes = `<button class="btn btn-secondary btn-sm" onclick="verDetalhesCliente(${cli.id})" title="Ver detalhes e pedidos">👁️ Ver</button>`;
+            if (podeEditar) {
+                acaoBotoes += ` <button class="btn btn-primary btn-sm" onclick="iniciarEdicaoCliente(${cli.id})" title="Editar dados">✏️ Editar</button>`;
+            }
+            if (podeExcluir) {
+                acaoBotoes += ` <button class="btn btn-danger btn-sm" onclick="excluirCliente(${cli.id}, '${cli.nome}', ${totalPed})" title="Excluir cliente">🗑️</button>`;
+            }
+
             tr.innerHTML = `
                 <td>#${cli.id}</td>
                 <td><strong>${cli.nome}</strong></td>
@@ -1790,11 +1813,7 @@ async function carregarClientes(busca = '') {
                 <td>${cli.telefone || '-'}</td>
                 <td>${cli.cidade || '-'}${cli.uf && cli.uf !== '-' ? ' / ' + cli.uf : ''}</td>
                 <td>${badgePed}</td>
-                <td>
-                    <button class="btn btn-secondary btn-sm" onclick="verDetalhesCliente(${cli.id})" title="Ver detalhes e pedidos">👁️ Ver</button>
-                    <button class="btn btn-primary btn-sm" onclick="iniciarEdicaoCliente(${cli.id})" title="Editar dados">✏️ Editar</button>
-                    <button class="btn btn-danger btn-sm" onclick="excluirCliente(${cli.id}, '${cli.nome}', ${totalPed})" title="Excluir cliente">🗑️</button>
-                </td>
+                <td>${acaoBotoes}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -1858,6 +1877,10 @@ async function salvarCliente(event) {
 }
 
 async function iniciarEdicaoCliente(id) {
+    if (usuarioAtual && usuarioAtual.perfil !== 'Administrador') {
+        mostrarAlerta('Apenas o Administrador possui permissão para editar dados cadastrais de clientes.', 'erro');
+        return;
+    }
     try {
         const res = await fetch(`/api/clientes/${id}`);
         if (!res.ok) {

@@ -277,6 +277,24 @@ class TestAuthRBAC(unittest.TestCase):
         res_pag_vendas = self.client.patch('/api/pedidos/1/pagamento', json={'status_pagamento': 'Confirmado'})
         self.assertEqual(res_pag_vendas.status_code, 403)
 
+        # 10.1.1 Vendas NÃO PODE editar clientes existentes (apenas cadastrar e consultar)
+        res_edit_cli_vendas = self.client.put('/api/clientes/1', json={'nome': 'Nome Alterado', 'email': 'alt@t.com', 'cpf': '12345678909'})
+        self.assertEqual(res_edit_cli_vendas.status_code, 403)
+
+        res_patch_cli_vendas = self.client.patch('/api/clientes/1', json={'telefone': '11999999999'})
+        self.assertEqual(res_patch_cli_vendas.status_code, 403)
+
+        # 10.1.2 Vendas PODE cadastrar novo cliente (permissão preservada)
+        from models.usuario import UsuarioFactory
+        vendedor_obj = UsuarioFactory.criar_usuario("Vendas", "Vendedor", "vendas@t.com")
+        self.assertTrue(vendedor_obj.pode_executar('cadastrar_cliente'))
+        self.assertFalse(vendedor_obj.pode_executar('editar_cliente'))
+        self.assertFalse(vendedor_obj.pode_executar('excluir_cliente'))
+
+        # Administrador PODE editar cliente
+        admin_obj = UsuarioFactory.criar_usuario("Administrador", "Admin", "admin@t.com")
+        self.assertTrue(admin_obj.pode_executar('editar_cliente'))
+
         # 10.2 Gerência NÃO PODE confirmar pagamento manual
         with self.client.session_transaction() as sess:
             sess['usuario_id'] = 4

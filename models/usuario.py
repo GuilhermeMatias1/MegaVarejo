@@ -178,14 +178,14 @@ class Estoquista(Usuario):
 class Vendedor(Usuario):
     """
     Especialização Vendas: Acesso a Estoque (apenas consulta), Pedidos e Clientes.
-    Operações permitidas: cadastrar e gerenciar clientes, criar e gerenciar pedidos, solicitar cancelamento e devolução.
-    Operações proibidas: movimentação manual ou ajuste de estoque, alteração de produtos/preços,
-    confirmação manual de pagamentos, financeiro ou usuários.
+    Operações permitidas: cadastrar e consultar clientes, criar e gerenciar pedidos, solicitar cancelamento e devolução.
+    Operações proibidas: editar dados de clientes cadastrados, exclusão de clientes, movimentação manual ou ajuste de estoque,
+    alteração de produtos/preços, confirmação manual de pagamentos, financeiro ou usuários.
     Demonstra POLIMORFISMO.
     """
     PERMISSOES = {'produtos', 'estoque', 'pedidos', 'clientes'}
     ACOES_PERMITIDAS = {
-        'cadastrar_cliente', 'editar_cliente', 'criar_pedido', 'gerenciar_pedido',
+        'cadastrar_cliente', 'criar_pedido', 'gerenciar_pedido',
         'cancelar_pedido', 'solicitar_devolucao'
     }
 
