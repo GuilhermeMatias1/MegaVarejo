@@ -1,4 +1,4 @@
-MegaVarejo S.A. — Sistema ERP
+# MegaVarejo S.A. — Sistema ERP
 
 Sistema de Planejamento de Recursos Empresariais (ERP) desenvolvido para a MegaVarejo S.A., uma empresa fictícia do setor varejista que busca integrar suas operações físicas e digitais.
 
